@@ -75,6 +75,7 @@ def setup(name, bran, adminPort, bootPort, base='', httpPort=None, configFile=No
                         'signify-resource', 'signify-timestamp']))
     if os.getenv("KERI_AGENT_CORS", "false").lower() in ("true", "1"):
         app.add_middleware(middleware=httping.HandleCORS())
+        bootApp.add_middleware(middleware=httping.HandleCORS())
     app.add_middleware(authing.SignatureValidationComponent(agency=agency, authn=authn, allowed=["/agent"]))
     app.req_options.media_handlers.update(media.Handlers())
     app.resp_options.media_handlers.update(media.Handlers())
@@ -116,6 +117,9 @@ def setup(name, bran, adminPort, bootPort, base='', httpPort=None, configFile=No
         specEnd = AgentSpecResource(app=app, title='KERIA Interactive Web Interface API')
         specEnd.addRoutes(happ)
         happ.add_route("/spec.yaml", specEnd)
+
+        if os.getenv("KERI_AGENT_CORS", "false").lower() in ("true", "1"):
+            happ.add_middleware(middleware=httping.HandleCORS())
 
     print("The Agency is loaded and waiting for requests...")
     return doers
