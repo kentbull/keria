@@ -8,7 +8,7 @@ Testing the Mark II Agent
 import falcon.testing
 from hio.help import Hict
 from keri.app import habbing, httping
-from keri.core import coring, serdering
+from keri.core import coring, serdering, signing
 from keri.core.coring import randomNonce, MtrDex
 from keri.vdr import eventing
 from keria.end import ending
@@ -18,7 +18,7 @@ from keria.app import indirecting, aiding
 
 def test_indirecting(helpers):
     salt = b'0123456789abcdef'
-    salter = coring.Salter(raw=salt)
+    salter = signing.Salter(raw=salt)
     with helpers.openKeria() as (agency, agent, app, client), \
             habbing.openHby(name="keria", salt=salter.qb64, temp=True) as hby:
 

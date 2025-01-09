@@ -9,7 +9,7 @@ import json
 
 import falcon
 from keri.app import habbing
-from keri.core import coring, eventing, serdering
+from keri.core import coring, eventing, serdering, signing
 from keri.peer import exchanging
 
 from keria.core import httping, longrunning
@@ -77,7 +77,7 @@ class IpexAdmitCollectionEnd:
 
         # use that data to create th Serder and Sigers for the exn
         serder = serdering.SerderKERI(sad=ked)
-        sigers = [coring.Siger(qb64=sig) for sig in sigs]
+        sigers = [signing.Siger(qb64=sig) for sig in sigs]
 
         # Now create the stream to send, need the signer seal
         kever = hab.kever
@@ -116,7 +116,7 @@ class IpexAdmitCollectionEnd:
 
         # use that data to create th Serder and Sigers for the exn
         serder = serdering.SerderKERI(sad=ked)
-        sigers = [coring.Siger(qb64=sig) for sig in sigs]
+        sigers = [signing.Siger(qb64=sig) for sig in sigs]
 
         # Now create the stream to send, need the signer seal
         kever = hab.mhab.kever
@@ -204,7 +204,7 @@ class IpexGrantCollectionEnd:
 
         # use that data to create th Serder and Sigers for the exn
         serder = serdering.SerderKERI(sad=ked)
-        sigers = [coring.Siger(qb64=sig) for sig in sigs]
+        sigers = [signing.Siger(qb64=sig) for sig in sigs]
 
         # Now create the stream to send, need the signer seal
         kever = hab.kever
@@ -240,7 +240,7 @@ class IpexGrantCollectionEnd:
 
         # use that data to create th Serder and Sigers for the exn
         serder = serdering.SerderKERI(sad=ked)
-        sigers = [coring.Siger(qb64=sig) for sig in sigs]
+        sigers = [signing.Siger(qb64=sig) for sig in sigs]
 
         # Now create the stream to send, need the signer seal
         kever = hab.mhab.kever

@@ -12,7 +12,7 @@ from falcon import testing
 from hio.base import doing
 from hio.help import decking
 from keri.app import habbing, signing
-from keri.core import eventing, coring, parsing, serdering
+from keri.core import eventing, coring, parsing, serdering, signing
 from keri.help import helping
 from keri.kering import Roles
 from keri.peer import exchanging
@@ -306,7 +306,7 @@ def test_ipex_grant(helpers, mockHelpingNowIso8601, seeder):
         assert len(agent.exchanges) == 1
         assert len(agent.grants) == 1
 
-        ims = eventing.messagize(serder=exn, sigers=[coring.Siger(qb64=sigs[0])])
+        ims = eventing.messagize(serder=exn, sigers=[signing.Siger(qb64=sigs[0])])
         # Test sending embedded admit in multisig/exn message
         exn, end = exchanging.exchange(route="/multisig/exn",
                                        payload=dict(),
@@ -331,10 +331,10 @@ def test_ipex_grant(helpers, mockHelpingNowIso8601, seeder):
 
 
 def test_multisig_grant_admit(seeder, helpers):
-    with (helpers.openKeria(salter=coring.Salter(raw=b'0123456789abcM00')) as (agency0, agent0, app0, client0), \
-            helpers.openKeria(salter=coring.Salter(raw=b'0123456789abcM01')) as (agency1, agent1, app1, client1), \
-            helpers.openKeria(salter=coring.Salter(raw=b'0123456789abcM02')) as (hagency0, hagent0, happ0, hclient0), \
-            helpers.openKeria(salter=coring.Salter(raw=b'0123456789abcM03')) as (hagency1, hagent1, happ1, hclient1)):
+    with (helpers.openKeria(salter=signing.Salter(raw=b'0123456789abcM00')) as (agency0, agent0, app0, client0), \
+            helpers.openKeria(salter=signing.Salter(raw=b'0123456789abcM01')) as (agency1, agent1, app1, client1), \
+            helpers.openKeria(salter=signing.Salter(raw=b'0123456789abcM02')) as (hagency0, hagent0, happ0, hclient0), \
+            helpers.openKeria(salter=signing.Salter(raw=b'0123456789abcM03')) as (hagency1, hagent1, happ1, hclient1)):
 
         tock = 0.03125
         doist = doing.Doist(tock=tock, real=True)

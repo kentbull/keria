@@ -12,7 +12,7 @@ import falcon
 from keri import kering
 from keri.app import habbing
 from keri.app.keeping import Algos
-from keri.core import coring, serdering
+from keri.core import coring, serdering, signing
 from keri.core.coring import Ilks
 from keri.db import dbing
 from keri.help import ogler
@@ -157,7 +157,7 @@ class AgentResourceEnd:
         sigs = body["sigs"]
 
         ctrlHab = agent.hby.habByName(caid, ns="agent")
-        ctrlHab.rotate(serder=rot, sigers=[coring.Siger(qb64=sig) for sig in sigs])
+        ctrlHab.rotate(serder=rot, sigers=[signing.Siger(qb64=sig) for sig in sigs])
 
         if not self.authn.verify(req):
             raise falcon.HTTPForbidden(description="invalid signature on request")
@@ -183,7 +183,7 @@ class AgentResourceEnd:
                 prxs = val["prxs"]
 
                 for idx, prx in enumerate(prxs):
-                    cipher = coring.Cipher(qb64=prx)
+                    cipher = signing.Cipher(qb64=prx)
                     agent.mgr.rb.prxs.put(keys=verfers[idx].qb64b, val=cipher)
 
                 if "nxts" in val:
@@ -192,7 +192,7 @@ class AgentResourceEnd:
                         raise ValueError("If encrypted private next keys are provided, must match digers")
 
                     for idx, prx in enumerate(nxts):
-                        cipher = coring.Cipher(qb64=prx)
+                        cipher = signing.Cipher(qb64=prx)
                         agent.mgr.rb.nxts.put(keys=digers[idx].qb64b, val=cipher)
 
         agent.mgr.delete_sxlt()
@@ -212,7 +212,7 @@ class AgentResourceEnd:
         ked = body['ixn']
         sigs = body['sigs']
         ixn = serdering.SerderKERI(sad=ked)
-        sigers = [coring.Siger(qb64=sig) for sig in sigs]
+        sigers = [signing.Siger(qb64=sig) for sig in sigs]
 
         ctrlHab = agent.hby.habByName(caid, ns="agent")
 
@@ -312,7 +312,7 @@ class IdentifierCollectionEnd:
 
             serder = serdering.SerderKERI(sad=icp)
 
-            sigers = [coring.Siger(qb64=sig) for sig in sigs]
+            sigers = [signing.Siger(qb64=sig) for sig in sigs]
 
             if agent.hby.habByName(name) is not None:
                 raise falcon.HTTPBadRequest(title=f"AID with name {name} already incepted")
@@ -407,7 +407,7 @@ class IdentifierCollectionEnd:
                 # create Hab and incept the key store (if any)
                 # Generate response, either the serder or a long running operaton indicator for the type
                 rep.content_type = "application/json"
-                if hab.kever.delegator:
+                if hab.kever.delpre:
                     agent.anchors.append(dict(pre=hab.pre, sn=0))
                     op = agent.monitor.submit(hab.kever.prefixer.qb64, longrunning.OpTypes.delegation,
                                               metadata=dict(pre=hab.pre, sn=0))
@@ -506,7 +506,7 @@ class IdentifierResourceEnd:
                                         description=f"required field 'sigs' missing from request")
 
         serder = serdering.SerderKERI(sad=rot)
-        sigers = [coring.Siger(qb64=sig) for sig in sigs]
+        sigers = [signing.Siger(qb64=sig) for sig in sigs]
 
         hab.rotate(serder=serder, sigers=sigers)
 
@@ -539,7 +539,7 @@ class IdentifierResourceEnd:
 
             return op
 
-        if hab.kever.delegator:
+        if hab.kever.delpre:
             agent.anchors.append(dict(alias=name, pre=hab.pre, sn=serder.sn))
             op = agent.monitor.submit(hab.kever.prefixer.qb64, longrunning.OpTypes.delegation,
                                       metadata=dict(pre=hab.pre, sn=serder.sn))
@@ -572,7 +572,7 @@ class IdentifierResourceEnd:
                                         description=f"required field 'sigs' missing from request")
 
         serder = serdering.SerderKERI(sad=ixn)
-        sigers = [coring.Siger(qb64=sig) for sig in sigs]
+        sigers = [signing.Siger(qb64=sig) for sig in sigs]
 
         hab.interact(serder=serder, sigers=sigers)
 
@@ -613,7 +613,7 @@ def info(hab, rm, full=False):
         data["state"] = asdict(kever.state())
         dgkey = dbing.dgKey(kever.prefixer.qb64b, kever.serder.saidb)
         wigs = hab.db.getWigs(dgkey)
-        data["windexes"] = [coring.Siger(qb64b=bytes(wig)).index for wig in wigs]
+        data["windexes"] = [signing.Siger(qb64b=bytes(wig)).index for wig in wigs]
 
     return data
 
@@ -822,7 +822,7 @@ class EndRoleCollectionEnd:
             raise falcon.errors.HTTPBadRequest(
                 description=f"error trying to create end role for unknown local AID {pre}")
 
-        rsigers = [coring.Siger(qb64=rsig) for rsig in rsigs]
+        rsigers = [signing.Siger(qb64=rsig) for rsig in rsigs]
         tsg = (hab.kever.prefixer, coring.Seqner(sn=hab.kever.sn), coring.Saider(qb64=hab.kever.serder.said), rsigers)
         try:
             agent.hby.rvy.processReply(rserder, tsgs=[tsg])

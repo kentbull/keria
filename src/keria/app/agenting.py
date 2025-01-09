@@ -24,6 +24,7 @@ from keri.app.grouping import Counselor
 from keri.app.keeping import Algos
 from keri.core import coring, parsing, eventing, routing, serdering
 from keri.core.coring import Ilks, randomNonce
+from keri.core import signing
 from keri.db import dbing
 from keri.db.basing import OobiRecord
 from keri.vc import protocoling
@@ -815,7 +816,7 @@ class BootEnd:
         if "sig" not in body:
             raise falcon.HTTPBadRequest(title="invalid inception",
                                         description=f'required field "sig" missing from body')
-        siger = coring.Siger(qb64=body["sig"])
+        siger = signing.Siger(qb64=body["sig"])
 
         caid = icp.pre
 

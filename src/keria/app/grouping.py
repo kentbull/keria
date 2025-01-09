@@ -8,7 +8,7 @@ import json
 
 import falcon
 from keri.app import habbing
-from keri.core import coring, eventing, serdering
+from keri.core import coring, eventing, serdering, signing
 from keri.kering import SerializeError
 
 from keria.core import httping, longrunning
@@ -56,7 +56,7 @@ class MultisigRequestCollectionEnd:
         atc = httping.getRequiredParam(body, "atc")
 
         # create sigers from the edge signatures so we can messagize the whole thing
-        sigers = [coring.Siger(qb64=sig) for sig in sigs]
+        sigers = [signing.Siger(qb64=sig) for sig in sigs]
 
         # create seal for the proper location to find the signatures
         kever = hab.mhab.kever
@@ -116,7 +116,7 @@ class MultisigJoinCollectionEnd:
                 agent.hby.deleteHab(name=name)
                 raise falcon.HTTPBadRequest(description=f"attempt to merge with unknown AID={recp}")
 
-        sigers = [coring.Siger(qb64=sig) for sig in sigs]
+        sigers = [signing.Siger(qb64=sig) for sig in sigs]
         verfers = [coring.Verfer(qb64=k) for k in rot['k']]
         digers = [coring.Diger(qb64=n) for n in rot['n']]
 

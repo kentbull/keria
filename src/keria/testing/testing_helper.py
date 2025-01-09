@@ -12,7 +12,7 @@ from falcon import testing
 from hio.core import http
 from keri import kering
 from keri.app import keeping, habbing, configing, signing
-from keri.core import coring, eventing, parsing, routing, scheming, serdering
+from keri.core import coring, eventing, parsing, routing, scheming, serdering, signing
 from keri.core.coring import MtrDex
 from keri.core.eventing import SealEvent
 from keri.help import helping
@@ -327,7 +327,7 @@ class Helpers:
         if wits is None:
             wits = []
 
-        salter = coring.Salter(raw=bran)
+        salter = signing.Salter(raw=bran)
         creator = keeping.SaltyCreator(salt=salter.qb64, stem=stem, tier=coring.Tiers.low)
 
         signers = creator.create(pidx=pidx, ridx=0, tier=coring.Tiers.low, temp=False, count=count)
@@ -361,10 +361,10 @@ class Helpers:
         if wits is None:
             wits = []
 
-        salter = coring.Salter(raw=bran)
+        salter = signing.Salter(raw=bran)
         signer = salter.signer(transferable=False)
         aeid = signer.verfer.qb64
-        encrypter = coring.Encrypter(verkey=aeid)
+        encrypter = signing.Encrypter(verkey=aeid)
 
         creator = keeping.RandyCreator()
         signers = creator.create(count=count)
@@ -410,7 +410,7 @@ class Helpers:
     @staticmethod
     def interact(pre, bran, pidx, ridx, sn, dig, data):
         serder = eventing.interact(pre=pre, dig=dig, sn=sn, data=data)
-        salter = coring.Salter(raw=bran)
+        salter = signing.Salter(raw=bran)
         creator = keeping.SaltyCreator(salt=salter.qb64, stem="signify:aid", tier=coring.Tiers.low)
 
         signers = creator.create(pidx=pidx, ridx=ridx, tier=coring.Tiers.low, temp=False, count=1)
@@ -419,7 +419,7 @@ class Helpers:
 
     @staticmethod
     def sign(bran, pidx, ridx, ser):
-        salter = coring.Salter(raw=bran)
+        salter = signing.Salter(raw=bran)
         creator = keeping.SaltyCreator(salt=salter.qb64, stem="signify:aid", tier=coring.Tiers.low)
 
         signers = creator.create(pidx=pidx, ridx=ridx, tier=coring.Tiers.low, temp=False, count=1)
@@ -431,8 +431,8 @@ class Helpers:
         serder, signers = Helpers.incept(salt, "signify:aid", pidx=0, wits=wits, toad=toad, delpre=delpre)
         assert len(signers) == 1
 
-        salter = coring.Salter(raw=salt)
-        encrypter = coring.Encrypter(verkey=signers[0].verfer.qb64)
+        salter = signing.Salter(raw=salt)
+        encrypter = signing.Encrypter(verkey=signers[0].verfer.qb64)
         sxlt = encrypter.encrypt(salter.qb64).qb64
 
         sigers = [signer.sign(ser=serder.raw, index=0).qb64 for signer in signers]
@@ -518,7 +518,7 @@ class Helpers:
 
         if salter is None:
             salt = b'0123456789abcdef'
-            salter = coring.Salter(raw=salt)
+            salter = signing.Salter(raw=salt)
 
         if cf is None:
             cf = configing.Configer(name="keria", headDirPath="tests/scripts", reopen=True, clear=False)
