@@ -14,42 +14,54 @@ import os
 import urllib.parse
 from base64 import urlsafe_b64encode
 from dataclasses import asdict, dataclass
+from importlib import resources
 from typing import Any
 
 import falcon
+from hio.base import doing
 from keri import kering
 from keri.app import habbing, signing
-from keri.core import coring, serdering
+from keri.core import coring, eventing, scheming, serdering
+from keri.db import dbing
 from keri.help import helping
-from keri.vdr import credentialing, viring
+from keri.vc import proving
+from keri.vdr import credentialing, eventing as vdr_eventing, viring
 
 from .. import log_name, ogler
 
 logger = ogler.getLogger(log_name)
+
+RESOURCE_PACKAGE = "keria.resources"
 
 DID_JSON = "did.json"
 KERI_CESR = "keri.cesr"
 CESR_MIME = "application/cesr"
 
 DES_ALIASES_SCHEMA = "EN6Oh5XSD5_q2Hgu-aqpdfbVepdpYpFlgz6zvJL5b_r5"
+DES_ALIASES_RULES_FILE = "designated-aliases-rules.json"
+DES_ALIASES_PUBLIC_SCHEMA_FILE = "designated-aliases-public-schema.json"
 DEFAULT_PATH = "dws"
 DEFAULT_REGISTRY_PREFIX = "did:webs_designated_aliases"
 
-DES_ALIASES_RULES = {
-    "d": "EEVTx0jLLZDQq8a5bXrXgVP0JDP7j8iDym9Avfo8luLw",
-    "aliasDesignation": {
-        "l": "The issuer of this ACDC designates the identifiers in the ids field as the only allowed namespaced aliases of the issuer's AID."
-    },
-    "usageDisclaimer": {
-        "l": "This attestation only asserts designated aliases of the controller of the AID, that the AID controlled namespaced alias has been designated by the controller. It does not assert that the controller of this AID has control over the infrastructure or anything else related to the namespace other than the included AID."
-    },
-    "issuanceDisclaimer": {
-        "l": "All information in a valid and non-revoked alias designation assertion is accurate as of the date specified."
-    },
-    "termsOfUse": {
-        "l": "Designated aliases of the AID must only be used in a manner consistent with the expressed intent of the AID controller."
-    },
-}
+# states for the did:webs publication of designated aliases self-attestation ACDC
+PUBLICATION_READY = "ready"
+PUBLICATION_WAITING_DELEGATION = "waiting_delegation"
+PUBLICATION_WAITING_REGISTRY = "waiting_registry"
+PUBLICATION_ISSUING = "issuing"
+PUBLICATION_CLIENT_SIGNATURE_REQUIRED = "client_signature_required"
+PUBLICATION_DISABLED = "disabled"
+PUBLICATION_ERROR = "error"
+
+
+def _loadJsonResource(filename: str) -> dict[str, Any]:
+    with resources.files(RESOURCE_PACKAGE).joinpath(filename).open(
+        encoding="utf-8"
+    ) as resource:
+        return json.load(resource)
+
+
+DES_ALIASES_RULES = _loadJsonResource(DES_ALIASES_RULES_FILE)
+DES_ALIASES_PUBLIC_SCHEMA = _loadJsonResource(DES_ALIASES_PUBLIC_SCHEMA_FILE)
 
 
 class ArtifactUnavailable(ValueError):
@@ -68,6 +80,7 @@ class DidWebsConfig:
     path: str | None = None
     meta: bool = False
     registry_name_prefix: str = DEFAULT_REGISTRY_PREFIX
+    auto_issue: bool = True
 
 
 def loadPublicEnds(app, agency, config: DidWebsConfig):
@@ -116,6 +129,7 @@ def configFromSources(
         meta=parseBool(merged.get("meta", False)),
         registry_name_prefix=merged.get("registry_name_prefix")
         or DEFAULT_REGISTRY_PREFIX,
+        auto_issue=parseBool(merged.get("auto_issue", True)),
     )
 
     if didwebs.public_base_url is not None:
@@ -152,6 +166,7 @@ def configFromEnvironment() -> dict[str, Any]:
         "path": "KERIA_DID_WEBS_PATH",
         "meta": "KERIA_DID_WEBS_META",
         "registry_name_prefix": "KERIA_DID_WEBS_REGISTRY_NAME_PREFIX",
+        "auto_issue": "KERIA_DID_WEBS_AUTO_ISSUE",
     }
     return {
         key: os.getenv(env)
@@ -246,6 +261,221 @@ def aliasCredentialData(config: DidWebsConfig, aid: str) -> dict:
     }
 
 
+class DidWebsPublisherDoer(doing.Doer):
+    """Self-issue KERIA-owned did:webs designated-alias credentials."""
+
+    def __init__(self, agent, config: DidWebsConfig, tock=1.0):
+        self.agent = agent
+        self.config = config
+        self.state = PUBLICATION_DISABLED
+        self.error = None
+        super().__init__(tock=tock)
+
+    def recur(self, tyme, tock=0.0, **opts):
+        if not self.config.enabled or not self.config.auto_issue:
+            self.state = PUBLICATION_DISABLED
+            return False
+
+        try:
+            self.state = ensureAgentDesignatedAlias(self.agent, self.config)
+            self.error = None
+        except Exception as ex:  # pragma: no cover - defensive runtime logging
+            self.state = PUBLICATION_ERROR
+            self.error = str(ex)
+            logger.exception("failed did:webs designated-alias publication")
+
+        return False
+
+
+def ensureAgentDesignatedAlias(agent, config: DidWebsConfig) -> str:
+    """Advance automatic designated-alias issuance for the KERIA agent AID."""
+    aid = agent.agentHab.pre
+    did = didForAid(config, aid)
+    if matchingDesignatedAliases(agent.hby, agent.rgy, aid, did):
+        return PUBLICATION_READY
+
+    if not hasDelegationSourceSeal(agent.hby, agent.agentHab):
+        return PUBLICATION_WAITING_DELEGATION
+
+    pinDesignatedAliasesSchema(agent.hby)
+    processPublicationEscrows(agent)
+
+    registry = agent.rgy.registryByName(registryName(config, aid))
+    if registry is None:
+        registry = createDesignatedAliasesRegistry(agent, config, aid)
+        processPublicationEscrows(agent)
+        if not registryComplete(agent, registry):
+            return PUBLICATION_WAITING_REGISTRY
+
+    if not registryComplete(agent, registry):
+        processPublicationEscrows(agent)
+        return PUBLICATION_WAITING_REGISTRY
+
+    if findDesignatedAliasCredential(agent, config, aid, registry) is not None:
+        processPublicationEscrows(agent)
+        if matchingDesignatedAliases(agent.hby, agent.rgy, aid, did):
+            return PUBLICATION_READY
+        return PUBLICATION_ISSUING
+
+    issueDACred(agent, config, aid, registry)
+    processPublicationEscrows(agent)
+    if matchingDesignatedAliases(agent.hby, agent.rgy, aid, did):
+        return PUBLICATION_READY
+
+    return PUBLICATION_ISSUING
+
+
+def pinDesignatedAliasesSchema(hby: habbing.Habery):
+    """Pin the embedded public designated-alias schema into an agent Habery."""
+    schemer = hby.db.schema.get(keys=(DES_ALIASES_SCHEMA,))
+    if schemer is not None:
+        return schemer
+
+    schemer = scheming.Schemer(sed=copy.deepcopy(DES_ALIASES_PUBLIC_SCHEMA))
+    if schemer.said != DES_ALIASES_SCHEMA:
+        raise kering.ConfigurationError(
+            f"embedded designated-alias schema SAID mismatch: {schemer.said}"
+        )
+
+    hby.db.schema.pin(schemer.said, schemer)
+    return schemer
+
+
+def hasDelegationSourceSeal(hby: habbing.Habery, hab: habbing.Hab) -> bool:
+    """Return True when a delegated AID has its source seal available."""
+    if getattr(hab, "delpre", None) is None:
+        return True
+
+    prefixer = coring.Prefixer(qb64=hab.pre)
+    dig = hby.db.getKeLast(key=dbing.snKey(pre=prefixer.qb64b, sn=0))
+    if dig is None:
+        return False
+
+    dgkey = dbing.dgKey(pre=prefixer.qb64b, dig=bytes(dig))
+    return hby.db.getAes(dgkey) is not None
+
+
+def createDesignatedAliasesRegistry(agent, config: DidWebsConfig, aid: str):
+    """Create and anchor the dedicated designated-alias registry for an AID."""
+    registry = agent.rgy.makeRegistry(
+        name=registryName(config, aid), prefix=aid, noBackers=True
+    )
+    seal = eventing.SealEvent(registry.regk, "0", registry.regd)._asdict()
+    agent.agentHab.interact(data=[seal])
+    agent.registrar.incept(agent.agentHab, registry)
+    return registry
+
+
+def registryComplete(agent, registry) -> bool:
+    """Return True when the registry inception TEL event is complete."""
+    return agent.registrar.complete(pre=registry.regk, sn=0)
+
+
+def findDesignatedAliasCredential(agent, config: DidWebsConfig, aid: str, registry):
+    """Find any stored or in-progress matching designated-alias credential."""
+    did = didForAid(config, aid)
+    wanted = {did, did.replace("did:webs", "did:web", 1)}
+
+    for (_said,), creder in agent.rgy.reger.creds.getItemIter():
+        if creder.issuer != aid:
+            continue
+        if creder.schema != DES_ALIASES_SCHEMA:
+            continue
+        if creder.regi != registry.regk:
+            continue
+        aliases = set(creder.sad.get("a", {}).get("ids", []))
+        if wanted.issubset(aliases):
+            return creder
+
+    return None
+
+
+def issueDACred(agent, config: DidWebsConfig, aid: str, registry):
+    """Issue and anchor one self-issued designated-alias ACDC."""
+    data = aliasCredentialData(config, aid)
+    creder = proving.credential(
+        issuer=aid,
+        schema=DES_ALIASES_SCHEMA,
+        data=data,
+        status=registry.regk,
+        rules=DES_ALIASES_RULES,
+    )
+    agent.credentialer.validate(creder)
+
+    if registry.noBackers:
+        iserder = vdr_eventing.issue(
+            vcdig=creder.said, regk=registry.regk, dt=data["dt"]
+        )
+    else:
+        iserder = vdr_eventing.backerIssue(
+            vcdig=creder.said,
+            regk=registry.regk,
+            regsn=registry.regi,
+            regd=registry.regser.said,
+            dt=data["dt"],
+        )
+
+    rseq = coring.Seqner(snh=iserder.ked["s"])
+    seal = eventing.SealEvent(iserder.pre, rseq.snh, iserder.said)._asdict()
+    anc = agent.agentHab.interact(data=[seal])
+    aserder = serdering.SerderKERI(raw=bytes(anc))
+
+    agent.registrar.issue(registry.regk, iserder, aserder)
+    agent.credentialer.issue(creder=creder, serder=iserder)
+
+
+def processPublicationEscrows(agent):
+    """Run the existing registry and credential escrows needed by publication."""
+    agent.rgy.processEscrows()
+    agent.registrar.processEscrows()
+    agent.credentialer.processEscrows()
+    agent.verifier.processEscrows()
+
+
+def publicationState(agent, config: DidWebsConfig, aid: str) -> str:
+    """Return the did:webs publication state for one local AID."""
+    if not config.enabled:
+        return PUBLICATION_DISABLED
+
+    did = didForAid(config, aid)
+    if matchingDesignatedAliases(agent.hby, agent.rgy, aid, did):
+        return PUBLICATION_READY
+
+    if aid == agent.agentHab.pre:
+        publisher = getattr(agent, "didWebsPublisher", None)
+        if publisher is not None and publisher.state == PUBLICATION_ERROR:
+            return PUBLICATION_ERROR
+        if not config.auto_issue:
+            return PUBLICATION_DISABLED
+        if not hasDelegationSourceSeal(agent.hby, agent.agentHab):
+            return PUBLICATION_WAITING_DELEGATION
+
+        registry = agent.rgy.registryByName(registryName(config, aid))
+        if registry is not None and not registryComplete(agent, registry):
+            return PUBLICATION_WAITING_REGISTRY
+        if registry is not None and findDesignatedAliasCredential(
+            agent, config, aid, registry
+        ):
+            return PUBLICATION_ISSUING
+        return PUBLICATION_ISSUING
+
+    if hasAgentEndRole(agent, aid):
+        return PUBLICATION_CLIENT_SIGNATURE_REQUIRED
+
+    return PUBLICATION_DISABLED
+
+
+def hasAgentEndRole(agent, aid: str) -> bool:
+    """Return True when a managed AID authorizes this KERIA agent as agent."""
+    for (_, _erole, eid), _end in agent.hby.db.ends.getItemIter(
+        keys=(aid, kering.Roles.agent)
+    ):
+        if eid == agent.agentHab.pre:
+            return True
+
+    return False
+
+
 def statusForAid(agent, config: DidWebsConfig, aid: str) -> dict:
     """Return publication material and availability status for one local AID."""
     if not isLocalAid(agent, aid):
@@ -264,6 +494,7 @@ def statusForAid(agent, config: DidWebsConfig, aid: str) -> dict:
         "missing": [],
         "designatedAliasAvailable": alias_available,
         "optionalMissing": optional_missing,
+        "publicationState": publicationState(agent, config, aid),
         "registryName": registryName(config, aid),
         "schema": DES_ALIASES_SCHEMA,
         "credentialData": aliasCredentialData(config, aid),

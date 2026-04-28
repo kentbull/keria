@@ -44,6 +44,9 @@ keria = "keria.app.cli.keria:main"
 [tool.uv]
 package = true
 
+[tool.setuptools.package-data]
+"keria.resources" = ["*.json"]
+
 [dependency-groups]
 dev = [
     "ruff>=0.15.5",
