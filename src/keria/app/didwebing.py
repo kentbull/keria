@@ -283,8 +283,9 @@ class DidWebsPublisherDoer(doing.Doer):
             self.state = PUBLICATION_ERROR
             self.error = str(ex)
             logger.exception("failed did:webs designated-alias publication")
+            return False
 
-        return False
+        return self.state == PUBLICATION_READY
 
 
 def ensureAgentDesignatedAlias(agent, config: DidWebsConfig) -> str:

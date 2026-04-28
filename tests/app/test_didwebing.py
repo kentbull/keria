@@ -6,6 +6,7 @@ KERIA did:webs dynamic asset endpoint tests.
 import json
 
 import falcon
+from hio.base import doing
 from keri.app import configing
 from keri.core import coring, eventing, parsing
 from keri.core.eventing import SealEvent
@@ -212,9 +213,10 @@ def test_publisher_self_issues_agent_designated_alias_acdc(helpers):
         add_agent_delegation_source_seal(agent, helpers)
         publisher = didwebing.DidWebsPublisherDoer(agent=agent, config=config)
 
+        done = False
         for _ in range(10):
-            publisher.recur(0)
-            if publisher.state == didwebing.PUBLICATION_READY:
+            done = publisher.recur(0)
+            if done:
                 break
 
         aid = agent.agentHab.pre
@@ -223,6 +225,7 @@ def test_publisher_self_issues_agent_designated_alias_acdc(helpers):
         credentials = didwebing.getSelfIssuedAcdcs(aid, agent.rgy.reger)
 
         assert publisher.state == didwebing.PUBLICATION_READY
+        assert done is True
         assert status["publicationState"] == didwebing.PUBLICATION_READY
         assert status["designatedAliasAvailable"] is True
         assert registry is not None
@@ -245,6 +248,47 @@ def test_publisher_self_issues_agent_designated_alias_acdc(helpers):
             len(didwebing.getSelfIssuedAcdcs(aid, agent.rgy.reger))
             == credential_count
         )
+
+
+def test_agent_removes_did_webs_publisher_after_success(helpers, monkeypatch):
+    cf = configing.Configer(name="keria", temp=True, reopen=True, clear=True)
+    cf.put(
+        {
+            "did_webs": {
+                "enabled": True,
+                "domain": "127.0.0.1",
+                "host": "127.0.0.1",
+                "port": 3902,
+                "path": "dws",
+            }
+        }
+    )
+    calls = []
+
+    def publish_ready(_agent, _config):
+        calls.append((_agent, _config))
+        return didwebing.PUBLICATION_READY
+
+    monkeypatch.setattr(didwebing, "ensureAgentDesignatedAlias", publish_ready)
+
+    with helpers.openKeria(cf=cf) as (_agency, agent, _app, _client):
+        publisher = agent.didWebsPublisher
+        assert isinstance(publisher, didwebing.DidWebsPublisherDoer)
+        assert publisher in agent.doers
+
+        doist = doing.Doist(tock=0.03125)
+        deeds = doist.enter(doers=[agent])
+        try:
+            for _ in range(3):
+                doist.recur(deeds=deeds)
+
+            assert publisher.done is True
+            assert publisher not in agent.doers
+            assert agent.didWebsPublisher is None
+            assert all(deed[2] is not publisher for deed in agent.deeds)
+            assert len(calls) == 1
+        finally:
+            doist.exit(deeds=deeds)
 
 
 def test_asset_routes_return_generated_material_without_alias_acdc(helpers):

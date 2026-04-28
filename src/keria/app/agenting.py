@@ -908,6 +908,10 @@ class Agent(doing.DoDoer):
             self.shutdownAgent()  # will call exit so no need to return
             return True  # never gets here since shutdownAgent triggers exit
         super(Agent, self).recur(tyme=tyme)
+        if self.didWebsPublisher is not None and self.didWebsPublisher.done is True:
+            if self.didWebsPublisher in self.doers:
+                self.remove([self.didWebsPublisher])
+            self.didWebsPublisher = None
         return False
 
     def shutdownAgent(self):
