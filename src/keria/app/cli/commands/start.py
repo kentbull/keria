@@ -13,7 +13,7 @@ import os
 from keri import __version__
 from keri import help
 
-from keria.app import agenting
+from keria.app import agenting, didwebing
 
 d = "Runs KERI Signify Agent\n"
 d += "\tExample:\nkli ahab\n"
@@ -158,6 +158,7 @@ def launch(args):
             curls=getListVariable("KERIA_CURLS"),
             iurls=getListVariable("KERIA_IURLS"),
             durls=getListVariable("KERIA_DURLS"),
+            didWebs=didwebing.configFromEnvironment(),
             bootPassword=args.bootPassword,
             bootUsername=args.bootUsername,
         )

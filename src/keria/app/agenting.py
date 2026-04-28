@@ -58,7 +58,7 @@ from keri.app import challenging
 
 from keria.utils.openapi import dataclassFromFielddom
 
-from . import aiding, notifying, indirecting, credentialing, ipexing, delegating
+from . import aiding, notifying, indirecting, credentialing, ipexing, delegating, didwebing
 from . import grouping as keriagrouping
 from .serving import GracefulShutdownDoer
 from .. import log_name, ogler, set_log_level
@@ -144,6 +144,9 @@ class KERIAServerConfig:
     iurls: List[str] = field(default_factory=list)
     # Data OOBI URLs resolved at startup of each Agent. For things like ACDC schemas, ACDCs (credentials), or other CESR streams.
     durls: List[str] = field(default_factory=list)
+
+    # Optional did:webs dynamic asset hosting configuration.
+    didWebs: dict = field(default_factory=dict)
 
     # Experimental configuration
     # Experimental password for boot endpoint. Enables HTTP Basic Authentication for the boot endpoint. Only meant to be used for testing purposes.
@@ -963,6 +966,10 @@ def createAdminServerDoer(config: KERIAServerConfig, agency: Agency):
 
     keriaexchanging.loadEnds(app=adminApp)
     ipexing.loadEnds(app=adminApp)
+    didwebing.loadAdminEnds(
+        app=adminApp,
+        config=didwebing.configFromSources(config.didWebs, cf=agency.cf, httpPort=config.httpPort),
+    )
 
     adminServer = createHttpServer(
         config.adminPort, adminApp, config.keyPath, config.certPath, config.caFilePath
@@ -984,6 +991,11 @@ def createHttpServerDoer(
 
     ending.loadEnds(agency=agency, app=happ)
     indirecting.loadEnds(agency=agency, app=happ)
+    didwebing.loadPublicEnds(
+        app=happ,
+        agency=agency,
+        config=didwebing.configFromSources(config.didWebs, cf=agency.cf, httpPort=config.httpPort),
+    )
 
     swagsink = http.serving.StaticSink(staticDirPath="./static")
     happ.add_sink(swagsink, prefix="/swaggerui")
