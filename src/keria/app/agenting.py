@@ -230,6 +230,7 @@ class Agency(doing.DoDoer):
         curls=None,
         iurls=None,
         durls=None,
+        didWebs=None,
         cf=None,
     ):
         """
@@ -260,6 +261,7 @@ class Agency(doing.DoDoer):
         self.curls = curls
         self.iurls = iurls
         self.durls = durls
+        self.didWebs = didWebs
 
         if cf is None and self.configFile is not None:
             self.cf = configing.Configer(
@@ -318,6 +320,13 @@ class Agency(doing.DoDoer):
 
         if self.durls is not None and isinstance(self.durls, list):
             config["durls"] = config["durls"] + self.durls
+        if self.didWebs:
+            did_webs = (
+                asdict(self.didWebs)
+                if isinstance(self.didWebs, didwebing.DidWebsConfig)
+                else dict(self.didWebs)
+            )
+            config["did_webs"] = {**config.get("did_webs", {}), **did_webs}
         return config
 
     def _writeAgentConfig(self, caid):
@@ -710,6 +719,8 @@ class Agent(doing.DoDoer):
             verifier=self.verifier,
             notifier=self.notifier,
         )
+        self.didWebsConfig = didwebing.configFromSources({}, cf=self.hby.cf)
+        self.didWebsPublisher = None
 
         self.seeker = basing.Seeker(
             name=hby.name,
@@ -846,6 +857,13 @@ class Agent(doing.DoDoer):
                 self.submitter,
             ]
         )
+        if self.didWebsConfig.enabled and self.didWebsConfig.auto_issue:
+            self.didWebsPublisher = didwebing.DidWebsPublisherDoer(
+                agent=self,
+                config=self.didWebsConfig,
+                tock=self.tocks.get("didWebsPublisher", 1.0),
+            )
+            doers.append(self.didWebsPublisher)
 
         super(Agent, self).__init__(doers=doers, **opts)
 
@@ -968,7 +986,9 @@ def createAdminServerDoer(config: KERIAServerConfig, agency: Agency):
     ipexing.loadEnds(app=adminApp)
     didwebing.loadAdminEnds(
         app=adminApp,
-        config=didwebing.configFromSources(config.didWebs, cf=agency.cf, httpPort=config.httpPort),
+        config=didwebing.configFromSources(
+            config.didWebs, cf=agency.cf, httpPort=config.httpPort
+        ),
     )
 
     adminServer = createHttpServer(
@@ -994,7 +1014,9 @@ def createHttpServerDoer(
     didwebing.loadPublicEnds(
         app=happ,
         agency=agency,
-        config=didwebing.configFromSources(config.didWebs, cf=agency.cf, httpPort=config.httpPort),
+        config=didwebing.configFromSources(
+            config.didWebs, cf=agency.cf, httpPort=config.httpPort
+        ),
     )
 
     swagsink = http.serving.StaticSink(staticDirPath="./static")
@@ -1024,6 +1046,7 @@ def createAgency(config: KERIAServerConfig, temp=False, cf=None):
         curls=config.curls,
         iurls=config.iurls,
         durls=config.durls,
+        didWebs=config.didWebs,
         temp=temp,
         cf=cf,
     )
