@@ -27,7 +27,7 @@ from keri.vdr import credentialing
 from hio.base import doing
 
 
-from keria.app import aiding, agenting
+from keria.app import aiding, agenting, didwebing
 from keria.app.aiding import IdentifierOOBICollectionEnd, RpyEscrowCollectionEnd
 from keria.core import longrunning
 from keria.testing.testing_helper import SCRIPTS_DIR
@@ -47,6 +47,8 @@ def test_load_ends(helpers):
         assert isinstance(end, aiding.IdentifierCollectionEnd)
         (end, *_) = app._router.find("/identifiers/AID")
         assert isinstance(end, aiding.IdentifierResourceEnd)
+        (end, *_) = app._router.find("/identifiers/AID/dws")
+        assert isinstance(end, aiding.IdentifierDwsResourceEnd)
         (end, *_) = app._router.find("/identifiers/NAME/oobis")
         assert isinstance(end, aiding.IdentifierOOBICollectionEnd)
         (end, *_) = app._router.find("/identifiers/NAME/endroles")
@@ -150,6 +152,67 @@ def test_endrole_ends(helpers):
             "role": "agent",
             "eid": "EI7AkI40M11MS7lkTCb10JC9-nDt-tXwQh44OHAFlv_9",
         }
+
+
+def test_agent_resource_includes_dws_after_publication_ready(helpers, monkeypatch):
+    config = didwebing.DidWebsConfig(
+        enabled=True, domain="127.0.0.1", host="127.0.0.1", port=3902, path="dws"
+    )
+    with helpers.openKeria() as (_agency, agent, app, client):
+        agent.didWebsConfig = config
+        aiding.loadEnds(app=app, agency=_agency, authn=None)
+
+        pending = client.simulate_get(path=f"/agent/{agent.caid}")
+        assert pending.status_code == 200
+        assert pending.json["dws"] is None
+
+        did = didwebing.didForAid(config, agent.agentHab.pre)
+
+        monkeypatch.setattr(
+            didwebing,
+            "matchingDesignatedAliases",
+            lambda _hby, _rgy, aid, candidate: [candidate]
+            if aid == agent.agentHab.pre and candidate == did
+            else [],
+        )
+
+        ready = client.simulate_get(path=f"/agent/{agent.caid}")
+        assert ready.status_code == 200
+        assert ready.json["dws"] == did
+
+
+def test_identifier_dws_resource_returns_did_only_when_ready(helpers, monkeypatch):
+    config = didwebing.DidWebsConfig(
+        enabled=True, domain="127.0.0.1", host="127.0.0.1", port=3902, path="dws"
+    )
+    salt = b"0123456789abcdef"
+    with helpers.openKeria() as (_agency, agent, app, client):
+        agent.didWebsConfig = config
+        aiding.loadEnds(app=app, agency=_agency, authn=None)
+
+        op = helpers.createAid(client, "aid1", salt)
+        aid = op["response"]["i"]
+
+        pending = client.simulate_get(path="/identifiers/aid1/dws")
+        assert pending.status_code == 200
+        assert pending.json == {"dws": None}
+
+        missing = client.simulate_get(path="/identifiers/missing/dws")
+        assert missing.status_code == 404
+
+        did = didwebing.didForAid(config, aid)
+
+        monkeypatch.setattr(
+            didwebing,
+            "matchingDesignatedAliases",
+            lambda _hby, _rgy, candidate_aid, candidate: [candidate]
+            if candidate_aid == aid and candidate == did
+            else [],
+        )
+
+        ready = client.simulate_get(path="/identifiers/aid1/dws")
+        assert ready.status_code == 200
+        assert ready.json == {"dws": did}
 
 
 def test_locscheme_ends(helpers, mockHelpingNowUTC):
