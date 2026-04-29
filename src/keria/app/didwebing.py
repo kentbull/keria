@@ -5,6 +5,13 @@ KERIA did:webs dynamic asset endpoints.
 This module adapts the did:webs artifact-generation behavior used by
 ``did-webs-resolver`` into KERIA without making KERIA depend on that package at
 runtime.
+
+did:webs publication uses the generic agent signaling layer in
+``keria.app.streaming`` for live notifications. This module deliberately keeps
+only did:webs-specific state: asset generation, durable edge-signing requests,
+polling endpoints, and approval payload shape. The ``/didwebs/{aid}`` status
+route is a debug-only informational helper; it is not a Signify client workflow
+contract and may be removed.
 """
 
 import copy
@@ -19,6 +26,7 @@ from typing import Any
 
 import falcon
 from hio.base import doing
+from hio.help import decking
 from keri import kering
 from keri.app import habbing, signing
 from keri.core import coring, eventing, scheming, serdering
@@ -28,6 +36,8 @@ from keri.vc import proving
 from keri.vdr import credentialing, eventing as vdr_eventing, viring
 
 from .. import log_name, ogler
+from . import streaming
+from ..db.basing import DidWebsPubRecord, DidWebsSetupRecord
 
 logger = ogler.getLogger(log_name)
 
@@ -44,13 +54,27 @@ DEFAULT_PATH = "dws"
 DEFAULT_REGISTRY_PREFIX = "did:webs_designated_aliases"
 
 # states for the did:webs publication of designated aliases self-attestation ACDC
-PUBLICATION_READY = "ready"
-PUBLICATION_WAITING_DELEGATION = "waiting_delegation"
-PUBLICATION_WAITING_REGISTRY = "waiting_registry"
-PUBLICATION_ISSUING = "issuing"
-PUBLICATION_CLIENT_SIGNATURE_REQUIRED = "client_signature_required"
-PUBLICATION_DISABLED = "disabled"
-PUBLICATION_ERROR = "error"
+DWS_PUB_RDY = "ready"
+DWS_PUB_DELWAIT = "waiting_delegation"
+DWS_PUB_REGWAIT = "waiting_registry"
+DWS_PUB_ISS = "issuing"
+DWS_PUB_SIGREQ = "client_signature_required"
+DWS_PUB_DIS = "disabled"
+DWS_PUB_ERR = "error"
+
+# states for orchestrating managed AID did:webs designated alias ACDC and backing registry auto-creation
+DWS_SIG_ROUTE = "/didwebs/signing/request"
+DWS_RDY_ROUTE = "/didwebs/ready"
+DWS_REG_CREATE = "didwebs.registry.create"
+DWS_DA_ISSUE = "didwebs.designated-alias.issue"
+DWS_ACT_CRT_REG = "create_registry"
+DWS_ACT_ISS_DA = "issue_designated_alias"
+DWS_RDY_EVT = "didwebs.ready"
+
+# did:webs workflow states
+DWS_REQ_PND = "pending"
+DWS_REQ_CPT = "complete"
+DWS_REQ_FLD = "failed"
 
 
 def _loadJsonResource(filename: str) -> dict[str, Any]:
@@ -99,6 +123,10 @@ def loadAdminEnds(app, config: DidWebsConfig):
     if not config.enabled:
         return
 
+    requestsEnd = DIDWebsSigningRequestCollectionEnd(config)
+    app.add_route("/didwebs/signing/requests", requestsEnd)
+    requestEnd = DIDWebsSigningRequestResourceEnd(config)
+    app.add_route("/didwebs/signing/requests/{requestId}", requestEnd)
     statusEnd = DIDWebsStatusEnd(config)
     app.add_route("/didwebs/{aid}", statusEnd)
 
@@ -261,31 +289,490 @@ def aliasCredentialData(config: DidWebsConfig, aid: str) -> dict:
     }
 
 
-class DidWebsPublisherDoer(doing.Doer):
+class DidWebsAgentPublisher(doing.Doer):
     """Self-issue KERIA-owned did:webs designated-alias credentials."""
 
     def __init__(self, agent, config: DidWebsConfig, tock=1.0):
         self.agent = agent
         self.config = config
-        self.state = PUBLICATION_DISABLED
+        self.state = DWS_PUB_DIS
         self.error = None
         super().__init__(tock=tock)
 
     def recur(self, tyme, tock=0.0, **opts):
         if not self.config.enabled or not self.config.auto_issue:
-            self.state = PUBLICATION_DISABLED
+            self.state = DWS_PUB_DIS
             return False
 
         try:
             self.state = ensureAgentDesignatedAlias(self.agent, self.config)
             self.error = None
         except Exception as ex:  # pragma: no cover - defensive runtime logging
-            self.state = PUBLICATION_ERROR
+            self.state = DWS_PUB_ERR
             self.error = str(ex)
             logger.exception("failed did:webs designated-alias publication")
             return False
 
-        return self.state == PUBLICATION_READY
+        return self.state == DWS_PUB_RDY
+
+
+class DidWebsAidPublisher(doing.DoDoer):
+    """Coordinate edge-signed did:webs publication for Signify-managed AIDs.
+
+    This Doer is intentionally a coordinator, not a signer. KERIA does not own
+    Signify-managed AID keys, so it cannot create the registry or issue the
+    designated-alias ACDC itself. Instead, it advances durable publication work
+    until it reaches a step that needs the edge controller, then creates or
+    reuses a durable setup request and queues a transient SSE signal.
+
+    Mental model for maintainers:
+
+    * ``adb.dwspub`` is durable work tracking, keyed by managed AID. It answers
+      "which AIDs should this publisher keep advancing?"
+    * ``adb.dwsreq`` is durable client work, keyed by request SAID. It answers
+      "which edge-signed action should SignifyPy/SignifyTS perform?"
+    * ``workCues`` is an in-memory wakeup path. AID creation enqueues the AID so
+      a newly created record is processed promptly, but restart recovery comes
+      from ``adb.dwspub``.
+    * ``signalCues`` is the generic SSE handoff to ``SseBroadcasterDoer``. This
+      publisher enqueues intent only; the streaming Doer signs and broadcasts.
+    * SSE is only a nudge. Clients must dedupe by request SAID and polling
+      ``/didwebs/signing/requests`` remains the durable recovery path.
+    """
+
+    SignalInterval = 30.0
+    WorkBatchSize = 16
+
+    def __init__(
+        self, agent, config: DidWebsConfig, adb=None, signalCues=None, tock=1.0
+    ):
+        self.agent = agent
+        self.config = config
+        self.adb = adb if adb is not None else agent.adb
+        if signalCues is None:
+            raise ValueError("signalCues is required")
+        self.signalCues = signalCues
+        self.states = {}
+        self.errors = {}
+        # In-memory throttle keyed by setup request SAID. Active publication
+        # work is retried every Doer recurrence, but live SSE should be
+        # re-queued only occasionally while the durable request remains pending.
+        self.lastSignalTymes = {}
+        # Wakeup cues are distinct from durable work. Losing this deck on
+        # restart is fine because rehydratePublicationWork reloads adb.dwspub.
+        self.workCues = decking.Deck()
+        # Active non-ready work keyed by managed AID, with the local alias as
+        # the value needed for Signify client request payloads.
+        self.active = {}
+        # Ready events are transient and should be emitted once per process for
+        # each transition observed by this publisher.
+        self.readySignaled = set()
+        self.rehydratePublicationWork()
+        super().__init__(doers=[], tock=tock)
+
+    def recur(self, tyme, deeds=None):
+        if not self.config.enabled or not self.config.auto_issue:
+            return False
+
+        try:
+            self.processWorkCues()
+            self.processActive(tyme)
+        except Exception as ex:  # pragma: no cover - defensive runtime logging
+            self.errors["*"] = str(ex)
+            logger.exception("failed managed did:webs publication processing")
+
+        super().recur(tyme=tyme, deeds=deeds)
+        return False
+
+    def rehydratePublicationWork(self):
+        """Load durable non-ready publication work into the active set.
+
+        This is the restart path. Normal processing should not scan Habery
+        aliases every tick; ``adb.dwspub`` is the source of truth for managed
+        AIDs that were accepted by KERIA and need did:webs publication work.
+        """
+        if not self.config.enabled or not self.config.auto_issue:
+            return
+
+        for _keys, record in self.adb.dwspub.getItemIter():
+            self.states[record.aid] = record.state
+            if record.error is not None:
+                self.errors[record.aid] = record.error
+            if record.state != DWS_PUB_RDY:
+                self.active[record.aid] = record.name
+
+    def enqueue(self, name: str, aid: str):
+        """Queue one managed AID for prompt publication processing.
+
+        The durable record must already exist in ``adb.dwspub``. This method is
+        only a wakeup path used after AID creation; it is not the source of
+        truth for publication work.
+        """
+        self.workCues.append(dict(name=name, aid=aid))
+
+    def processWorkCues(self):
+        """Move newly queued durable work into the active repair set."""
+        while self.workCues:
+            cue = self.workCues.popleft()
+            aid = cue["aid"]
+            record = self.adb.dwspub.get(keys=(aid,))
+            # A stale in-memory cue can outlive a deleted or never-pinned
+            # durable record. In that case there is no publication contract to
+            # advance.
+            if record is None:
+                continue
+            if record.state == DWS_PUB_RDY:
+                self.states[aid] = DWS_PUB_RDY
+                self.active.pop(aid, None)
+                continue
+
+            name = cue.get("name") or record.name
+            self.active[aid] = name
+
+    def processActive(self, tyme):
+        """Advance active non-ready publication work in bounded batches.
+
+        ``tyme`` is the hio Doer scheduler time. It is used only for in-process
+        SSE re-signal throttling, not for durable protocol state.
+        """
+        now = 0.0 if tyme is None else tyme
+        processed = 0
+        for aid, name in list(self.active.items()):
+            if processed >= self.WorkBatchSize:
+                break
+
+            processed += 1
+            self.processPublicationWork(tyme=now, name=name, aid=aid)
+
+    def processPublicationWork(self, tyme, name: str, aid: str):
+        """Advance one durable publication record.
+
+        ``ensureManagedDesignatedAlias`` decides the next protocol milestone:
+        ready, waiting for registry completion, or client signature required.
+        This method persists that projection back into ``adb.dwspub`` and emits
+        transient signals when a durable setup request or ready transition is
+        observed.
+        """
+        store = self.adb.dwspub
+        record = store.get(keys=(aid,))
+        if record is None:
+            self.active.pop(aid, None)
+            return
+
+        previous = self.states.get(aid)
+        try:
+            state, request = ensureManagedDesignatedAlias(
+                self.agent, self.config, name, aid
+            )
+            record.name = name
+            record.did = didForAid(self.config, aid)
+            record.registryName = registryName(self.config, aid)
+            record.state = state
+            record.updated = helping.nowIso8601()
+            record.error = None
+            store.pin(keys=(aid,), val=record)
+            self.states[aid] = state
+            self.errors.pop(aid, None)
+
+            if request is not None:
+                # The setup request is durable in adb.dwsreq. This call only
+                # decides whether to queue a live SSE nudge for connected
+                # clients.
+                self.signalRequest(tyme, request)
+
+            if state == DWS_PUB_RDY:
+                self.active.pop(aid, None)
+                if previous != DWS_PUB_RDY and aid not in self.readySignaled:
+                    self.enqueueReady(aid)
+                    self.readySignaled.add(aid)
+            else:
+                self.active[aid] = name
+        except Exception as ex:  # pragma: no cover - defensive per-AID recovery
+            record.state = DWS_PUB_ERR
+            record.updated = helping.nowIso8601()
+            record.error = str(ex)
+            store.pin(keys=(aid,), val=record)
+            self.states[aid] = DWS_PUB_ERR
+            self.errors[aid] = str(ex)
+            self.active[aid] = name
+            logger.exception("failed managed did:webs publication for %s", aid)
+
+    def signalRequest(self, tyme, request: DidWebsSetupRecord):
+        """Queue a live setup-request signal immediately, then at a bounded cadence.
+
+        The same durable request may remain pending across many Doer recurrences
+        while the edge client is offline, slow, or still submitting signed
+        events. Re-signal throttling prevents an active AID from flooding the
+        transient SSE channel with the same request every tick. This state is
+        deliberately not durable; after restart KERIA may signal again, and the
+        client-side dedupe store suppresses duplicate approvals by request SAID.
+        """
+        last = self.lastSignalTymes.get(request.d)
+        if last is not None and tyme - last < self.SignalInterval:
+            return
+
+        self.enqueueSigningRequest(request)
+        self.lastSignalTymes[request.d] = tyme
+        request.lastSignaled = helping.nowIso8601()
+        self.adb.dwsreq.pin(keys=(request.d,), val=request)
+
+    def enqueueSigningRequest(self, request: DidWebsSetupRecord):
+        """Queue one managed-AID setup request for live SSE clients.
+
+        The queue entry is generic streaming intent. ``SseBroadcasterDoer`` will
+        add the agent-signed ``rpy`` envelope before fan-out.
+        """
+        streaming.enqueueSignedReplyCue(
+            self.signalCues,
+            event=request.type,
+            route=DWS_SIG_ROUTE,
+            payload=requestPayload(request),
+            event_id=request.d,
+        )
+
+    def enqueueReady(self, aid: str):
+        """Queue that did:webs artifacts are now publication-complete.
+
+        This is a convenience signal for connected clients. The durable truth is
+        still the observable designated-alias ACDC and the ``adb.dwspub`` ready
+        state.
+        """
+        streaming.enqueueSignedReplyCue(
+            self.signalCues,
+            event=DWS_RDY_EVT,
+            route=DWS_RDY_ROUTE,
+            payload={
+                "aid": aid,
+                "did": didForAid(self.config, aid),
+                **assetUrls(self.config, aid),
+                "timestamp": helping.nowIso8601(),
+            },
+            event_id=aid,
+        )
+
+
+def trackManagedAidPublication(
+    agent, name: str, aid: str, config: DidWebsConfig | None = None
+) -> DidWebsPubRecord | None:
+    """Idempotently create durable did:webs publication work for one managed AID."""
+    config = config if config is not None else getattr(agent, "didWebsConfig", None)
+    if config is None or not config.enabled or not config.auto_issue:
+        return None
+    if aid == agent.agentHab.pre:
+        return None
+
+    store = agent.adb.dwspub
+    now = helping.nowIso8601()
+    record = store.get(keys=(aid,))
+    try:
+        did = didForAid(config, aid)
+        regname = registryName(config, aid)
+    except ArtifactUnavailable:
+        logger.exception("unable to track did:webs publication work for %s", aid)
+        return None
+
+    if record is None:
+        record = DidWebsPubRecord(
+            aid=aid,
+            name=name,
+            agent=agent.agentHab.pre,
+            did=did,
+            registryName=regname,
+            state=DWS_PUB_SIGREQ,
+            created=now,
+            updated=now,
+        )
+    else:
+        record.name = name
+        record.agent = agent.agentHab.pre
+        record.did = did
+        record.registryName = regname
+        record.updated = now
+
+    store.pin(keys=(aid,), val=record)
+
+    publisher = getattr(agent, "didWebsManagedPublisher", None)
+    if publisher is not None:
+        publisher.enqueue(name=name, aid=aid)
+
+    return record
+
+
+def ensureManagedDesignatedAlias(
+    agent, config: DidWebsConfig, name: str, aid: str
+) -> tuple[str, DidWebsSetupRecord | None]:
+    """Advance edge-signing coordination for one Signify-managed AID."""
+    did = didForAid(config, aid)
+    if matchingDesignatedAliases(agent.hby, agent.rgy, aid, did):
+        completeSigningRequests(agent, aid)
+        return DWS_PUB_RDY, None
+
+    pinDesignatedAliasesSchema(agent.hby)
+    processPublicationEscrows(agent)
+
+    registry = agent.rgy.registryByName(registryName(config, aid))
+    if registry is None:
+        request = ensureSigningRequest(
+            agent=agent,
+            config=config,
+            name=name,
+            aid=aid,
+            request_type=DWS_REG_CREATE,
+            action=DWS_ACT_CRT_REG,
+        )
+        return DWS_PUB_SIGREQ, request
+
+    if not registryComplete(agent, registry):
+        processPublicationEscrows(agent)
+        return DWS_PUB_REGWAIT, None
+
+    completeSigningRequests(agent, aid, action=DWS_ACT_CRT_REG)
+
+    if findDesignatedAliasCredential(agent, config, aid, registry) is not None:
+        processPublicationEscrows(agent)
+        if matchingDesignatedAliases(agent.hby, agent.rgy, aid, did):
+            completeSigningRequests(agent, aid)
+            return DWS_PUB_RDY, None
+        return DWS_PUB_ISS, None
+
+    request = ensureSigningRequest(
+        agent=agent,
+        config=config,
+        name=name,
+        aid=aid,
+        request_type=DWS_DA_ISSUE,
+        action=DWS_ACT_ISS_DA,
+        registry_id=registry.regk,
+    )
+    return DWS_PUB_SIGREQ, request
+
+
+def ensureSigningRequest(
+    *,
+    agent,
+    config: DidWebsConfig,
+    name: str,
+    aid: str,
+    request_type: str,
+    action: str,
+    registry_id: str | None = None,
+) -> DidWebsSetupRecord:
+    """Create or reuse one durable managed-AID signing request."""
+    existing = findSigningRequest(
+        agent, aid=aid, action=action, states={DWS_REQ_PND, DWS_REQ_FLD}
+    )
+    if existing is not None:
+        return existing
+
+    did = didForAid(config, aid)
+    payload = {
+        "d": "",
+        "type": request_type,
+        "action": action,
+        "agent": agent.agentHab.pre,
+        "aid": aid,
+        "name": name,
+        "did": did,
+        "registryName": registryName(config, aid),
+        "schema": DES_ALIASES_SCHEMA,
+        "credentialData": aliasCredentialData(config, aid),
+        "rules": copy.deepcopy(DES_ALIASES_RULES),
+        **assetUrls(config, aid),
+        "dt": helping.nowIso8601(),
+    }
+    if registry_id is not None:
+        payload["registryId"] = registry_id
+    _saider, payload = coring.Saider.saidify(payload)
+    record = DidWebsSetupRecord(**payload)
+    agent.adb.dwsreq.put(keys=(record.d,), val=record)
+    return record
+
+
+def iterSigningRequests(agent, aid: str | None = None, states: set[str] | None = None):
+    """Iterate durable managed-AID signing requests, optionally filtered."""
+    store = agent.adb.dwsreq
+    for _keys, request in store.getItemIter():
+        if aid is not None and request.aid != aid:
+            continue
+        if states is not None and request.state not in states:
+            continue
+        yield request
+
+
+def findSigningRequest(
+    agent, aid: str, action: str | None = None, states: set[str] | None = None
+):
+    """Return the first matching durable signing request for an AID."""
+    for request in iterSigningRequests(agent, aid=aid, states=states):
+        if action is None or request.action == action:
+            return request
+    return None
+
+
+def completeSigningRequests(agent, aid: str, action: str | None = None):
+    """Mark pending signing requests complete once the requested state appears."""
+    store = agent.adb.dwsreq
+    for request in iterSigningRequests(agent, aid=aid, states={DWS_REQ_PND}):
+        if action is not None and request.action != action:
+            continue
+        request.state = DWS_REQ_CPT
+        store.pin(keys=(request.d,), val=request)
+
+
+def requestPayload(request: DidWebsSetupRecord) -> dict:
+    """Return the immutable signed payload from a durable request record."""
+    payload = {
+        "d": request.d,
+        "type": request.type,
+        "action": request.action,
+        "agent": request.agent,
+        "aid": request.aid,
+        "name": request.name,
+        "did": request.did,
+        "registryName": request.registryName,
+        "schema": request.schema,
+        "credentialData": copy.deepcopy(request.credentialData),
+        "rules": copy.deepcopy(request.rules),
+        "didJsonUrl": request.didJsonUrl,
+        "keriCesrUrl": request.keriCesrUrl,
+        "dt": request.dt,
+    }
+    if request.registryId is not None:
+        payload["registryId"] = request.registryId
+    return payload
+
+
+def signingRequestEnvelope(agent, request: DidWebsSetupRecord) -> dict:
+    """Create a KERI rpy envelope signed by the KERIA agent AID."""
+    return streaming.signedReplyEnvelope(
+        agent, DWS_SIG_ROUTE, requestPayload(request)
+    )
+
+
+def signingRequestResponse(agent, request: DidWebsSetupRecord) -> dict:
+    """Return one durable request with its current signed envelope."""
+    return {
+        **requestPayload(request),
+        "state": request.state,
+        "lastSignaled": request.lastSignaled,
+        "error": request.error,
+        "envelope": signingRequestEnvelope(agent, request),
+    }
+
+
+def signingRequestSummary(agent, aid: str) -> dict | None:
+    """Return compact status data for the first active signing request."""
+    request = findSigningRequest(agent, aid=aid, states={DWS_REQ_PND, DWS_REQ_FLD})
+    if request is None:
+        return None
+    return {
+        "id": request.d,
+        "type": request.type,
+        "action": request.action,
+        "state": request.state,
+        "lastSignaled": request.lastSignaled,
+        "error": request.error,
+    }
 
 
 def ensureAgentDesignatedAlias(agent, config: DidWebsConfig) -> str:
@@ -293,10 +780,10 @@ def ensureAgentDesignatedAlias(agent, config: DidWebsConfig) -> str:
     aid = agent.agentHab.pre
     did = didForAid(config, aid)
     if matchingDesignatedAliases(agent.hby, agent.rgy, aid, did):
-        return PUBLICATION_READY
+        return DWS_PUB_RDY
 
     if not hasDelegationSourceSeal(agent.hby, agent.agentHab):
-        return PUBLICATION_WAITING_DELEGATION
+        return DWS_PUB_DELWAIT
 
     pinDesignatedAliasesSchema(agent.hby)
     processPublicationEscrows(agent)
@@ -306,24 +793,24 @@ def ensureAgentDesignatedAlias(agent, config: DidWebsConfig) -> str:
         registry = createDesignatedAliasesRegistry(agent, config, aid)
         processPublicationEscrows(agent)
         if not registryComplete(agent, registry):
-            return PUBLICATION_WAITING_REGISTRY
+            return DWS_PUB_REGWAIT
 
     if not registryComplete(agent, registry):
         processPublicationEscrows(agent)
-        return PUBLICATION_WAITING_REGISTRY
+        return DWS_PUB_REGWAIT
 
     if findDesignatedAliasCredential(agent, config, aid, registry) is not None:
         processPublicationEscrows(agent)
         if matchingDesignatedAliases(agent.hby, agent.rgy, aid, did):
-            return PUBLICATION_READY
-        return PUBLICATION_ISSUING
+            return DWS_PUB_RDY
+        return DWS_PUB_ISS
 
     issueDACred(agent, config, aid, registry)
     processPublicationEscrows(agent)
     if matchingDesignatedAliases(agent.hby, agent.rgy, aid, did):
-        return PUBLICATION_READY
+        return DWS_PUB_RDY
 
-    return PUBLICATION_ISSUING
+    return DWS_PUB_ISS
 
 
 def pinDesignatedAliasesSchema(hby: habbing.Habery):
@@ -434,51 +921,50 @@ def processPublicationEscrows(agent):
 
 
 def publicationState(agent, config: DidWebsConfig, aid: str) -> str:
-    """Return the did:webs publication state for one local AID."""
+    """Return a debug-only projection of did:webs publication state.
+
+    WARNING: Can be removed at any time and will be removed soon. Do not rely on this.
+    """
     if not config.enabled:
-        return PUBLICATION_DISABLED
+        return DWS_PUB_DIS
 
     did = didForAid(config, aid)
     if matchingDesignatedAliases(agent.hby, agent.rgy, aid, did):
-        return PUBLICATION_READY
+        return DWS_PUB_RDY
 
     if aid == agent.agentHab.pre:
-        publisher = getattr(agent, "didWebsPublisher", None)
-        if publisher is not None and publisher.state == PUBLICATION_ERROR:
-            return PUBLICATION_ERROR
+        publisher = getattr(agent, "didWebsAgentPublisher", None)
         if not config.auto_issue:
-            return PUBLICATION_DISABLED
-        if not hasDelegationSourceSeal(agent.hby, agent.agentHab):
-            return PUBLICATION_WAITING_DELEGATION
+            return DWS_PUB_DIS
+        if publisher is not None:
+            return publisher.state
+        return DWS_PUB_ISS
 
-        registry = agent.rgy.registryByName(registryName(config, aid))
-        if registry is not None and not registryComplete(agent, registry):
-            return PUBLICATION_WAITING_REGISTRY
-        if registry is not None and findDesignatedAliasCredential(
-            agent, config, aid, registry
-        ):
-            return PUBLICATION_ISSUING
-        return PUBLICATION_ISSUING
+    managedPublisher = getattr(agent, "didWebsManagedPublisher", None)
+    if managedPublisher is not None and aid in managedPublisher.errors:
+        return DWS_PUB_ERR
+    if not config.auto_issue:
+        return DWS_PUB_DIS
 
-    if hasAgentEndRole(agent, aid):
-        return PUBLICATION_CLIENT_SIGNATURE_REQUIRED
+    record = agent.adb.dwspub.get(keys=(aid,))
+    if record is not None:
+        if record.error is not None:
+            return DWS_PUB_ERR
+        return record.state
 
-    return PUBLICATION_DISABLED
+    if signingRequestSummary(agent, aid) is not None:
+        return DWS_PUB_SIGREQ
 
-
-def hasAgentEndRole(agent, aid: str) -> bool:
-    """Return True when a managed AID authorizes this KERIA agent as agent."""
-    for (_, _erole, eid), _end in agent.hby.db.ends.getItemIter(
-        keys=(aid, kering.Roles.agent)
-    ):
-        if eid == agent.agentHab.pre:
-            return True
-
-    return False
+    return DWS_PUB_DIS
 
 
 def statusForAid(agent, config: DidWebsConfig, aid: str) -> dict:
-    """Return publication material and availability status for one local AID."""
+    """Return debug-only publication material and availability for one local AID.
+
+    This is an informational maintainer endpoint. Signify clients should use
+    the durable signing-request endpoints and generic signal stream for
+    did:webs orchestration.
+    """
     if not isLocalAid(agent, aid):
         raise falcon.HTTPNotFound(description=f"{aid} is not a local KERIA identifier")
 
@@ -488,6 +974,12 @@ def statusForAid(agent, config: DidWebsConfig, aid: str) -> dict:
 
     urls = assetUrls(config, aid)
     return {
+        "debug": True,
+        "informational": True,
+        "notice": (
+            "Debug-only informational endpoint; not a Signify client workflow "
+            "contract and may be removed."
+        ),
         "aid": aid,
         "did": did,
         **urls,
@@ -500,6 +992,7 @@ def statusForAid(agent, config: DidWebsConfig, aid: str) -> dict:
         "schema": DES_ALIASES_SCHEMA,
         "credentialData": aliasCredentialData(config, aid),
         "rules": copy.deepcopy(DES_ALIASES_RULES),
+        "signingRequest": signingRequestSummary(agent, aid),
     }
 
 
@@ -933,7 +1426,12 @@ class KeriCesrResourceEnd:
 
 
 class DIDWebsStatusEnd:
-    """Signed admin helper endpoint for did:webs publication material."""
+    """Debug-only signed admin helper for did:webs publication material.
+
+    This route is informational maintainer surface, not a Signify client
+    workflow contract. It may be removed once end-to-end VC-JWT presentation to
+    a W3C verifier no longer needs local inspection.
+    """
 
     def __init__(self, config: DidWebsConfig):
         self.config = config
@@ -943,3 +1441,40 @@ class DIDWebsStatusEnd:
         rep.status = falcon.HTTP_200
         rep.content_type = "application/json"
         rep.data = json.dumps(statusForAid(agent, self.config, aid)).encode("utf-8")
+
+
+class DIDWebsSigningRequestCollectionEnd:
+    """Signed admin polling endpoint for did:webs edge-signing requests."""
+
+    def __init__(self, config: DidWebsConfig):
+        self.config = config
+
+    def on_get(self, req, rep):
+        agent = req.context.agent
+        aid = req.get_param("aid")
+        include_complete = parseBool(req.get_param("includeComplete", False))
+        states = None if include_complete else {DWS_REQ_PND, DWS_REQ_FLD}
+        requests = [
+            signingRequestResponse(agent, request)
+            for request in iterSigningRequests(agent, aid=aid, states=states)
+        ]
+        rep.status = falcon.HTTP_200
+        rep.content_type = "application/json"
+        rep.data = json.dumps({"requests": requests}).encode("utf-8")
+
+
+class DIDWebsSigningRequestResourceEnd:
+    """Signed admin polling endpoint for one did:webs edge-signing request."""
+
+    def __init__(self, config: DidWebsConfig):
+        self.config = config
+
+    def on_get(self, req, rep, requestId):
+        agent = req.context.agent
+        request = agent.adb.dwsreq.get(keys=(requestId,))
+        if request is None:
+            raise falcon.HTTPNotFound(description=f"unknown did:webs request {requestId}")
+
+        rep.status = falcon.HTTP_200
+        rep.content_type = "application/json"
+        rep.data = json.dumps(signingRequestResponse(agent, request)).encode("utf-8")

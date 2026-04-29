@@ -297,6 +297,16 @@ def test_agent_resource(helpers, mockHelpingNowUTC):
         }
         assert res.json["pidx"] == 0
 
+        agent_inception = res.json["agent"]
+        agent.agentHab.interact(data=[])
+        latest = asdict(agent.hby.kevers[agent.pre].state())
+        assert latest["et"] == "ixn"
+        assert latest["s"] == "1"
+
+        res = client.simulate_get(path=f"/agent/{agent.caid}")
+        assert res.status_code == 200
+        assert res.json["agent"] == agent_inception
+
         # Test rotation
         body = {}
         res = client.simulate_put(path="/agent/bad_pre", body=json.dumps(body))

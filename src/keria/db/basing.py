@@ -6,6 +6,8 @@ keria.db.basing module
 """
 
 from dataclasses import dataclass
+from typing import Any
+
 from ordered_set import OrderedSet as oset
 
 from keri.core import coring
@@ -25,6 +27,67 @@ class IndexRecord:
 
     subkey: str
     paths: list
+
+
+@dataclass
+class DidWebsPubRecord:
+    """Durable managed-AID did:webs publication work item."""
+
+    aid: str
+    name: str
+    agent: str
+    did: str
+    registryName: str
+    state: str
+    created: str
+    updated: str
+    error: str | None = None
+
+
+@dataclass
+class DidWebsSetupRecord:
+    """
+    Durable managed-AID did:webs publication setup request.
+
+    TODO: refactor to multiple event records. Too many concerns are coupled together here.
+    """
+
+    # Request SAID assigned by coring.Saider.saidify(...) from the full setup payload.
+    d: str
+    # SSE event/request type supplied by the managed publisher.
+    type: str
+    # Client action to perform: create_registry or issue_designated_alias.
+    action: str
+    # KERIA agent AID from agent.agentHab.pre; signs the request envelope.
+    agent: str
+    # Managed AID prefix from the durable publication work seeded at AID creation.
+    aid: str
+    # Local managed AID alias captured at AID creation; edge clients use it for Signify APIs.
+    name: str
+    # did:webs DID derived from didForAid(config, aid).
+    did: str
+    # Dedicated designated-alias registry name from registryName(config, aid).
+    registryName: str
+    # Pinned designated-alias schema SAID from DES_ALIASES_SCHEMA.
+    schema: str
+    # Designated-alias credential subject from aliasCredentialData(config, aid).
+    credentialData: dict[str, Any]
+    # Designated-alias rules copied from DES_ALIASES_RULES.
+    rules: dict[str, Any]
+    # Public did.json URL returned by assetUrls(config, aid).
+    didJsonUrl: str
+    # Public keri.cesr URL returned by assetUrls(config, aid).
+    keriCesrUrl: str
+    # Setup request creation timestamp from helping.nowIso8601().
+    dt: str
+    # Registry SAID from registry.regk; present only for DA issuance requests.
+    registryId: str | None = None
+    # Durable workflow state; defaults pending and is completed by completeSigningRequests(...).
+    state: str = "pending"
+    # Last SSE queue timestamp set by DidWebsAidPublisher.signalRequest(...).
+    lastSignaled: str | None = None
+    # Optional failure text for failed setup requests; defaults to no error.
+    error: str | None = None
 
 
 class AgencyBaser(dbing.LMDBer):
@@ -69,6 +132,12 @@ class AgencyBaser(dbing.LMDBer):
             .aids values are Prefixer of Controller AID (caid)
                 keyed by managed AID.
                 Maps managed AIDs to their Signify Controller AID (caid).
+            .dwspub values are DidWebsPubRecord
+                keyed by managed AID.
+                Tracks managed AIDs that KERIA should publish as did:webs DIDs.
+            .dwsreq values are DidWebsSetupRecord
+                keyed by request SAID.
+                Tracks durable did:webs setup requests awaiting edge signing.
 
         Notes:
             dupsort=True for sub DB means allow unique (key,pair) duplicates at a key.
@@ -86,6 +155,8 @@ class AgencyBaser(dbing.LMDBer):
         self.agnt = None
         self.ctrl = None
         self.aids = None
+        self.dwspub = None
+        self.dwsreq = None
 
         super(AgencyBaser, self).__init__(
             headDirPath=headDirPath, perm=perm, reopen=reopen, **kwa
@@ -109,6 +180,20 @@ class AgencyBaser(dbing.LMDBer):
 
         # Sub-database keyed by qb64 AID mapping to the Prefixer object of the AID of its Agent
         self.aids = subing.CesrSuber(db=self, subkey="aids.", klas=coring.Prefixer)
+
+        # Sub-database keyed by managed AID for did:webs publication workflow state
+        self.dwspub = koming.Komer(
+            db=self,
+            subkey="dwspub.",
+            schema=DidWebsPubRecord,
+        )
+
+        # Sub-database keyed by did:webs setup request SAID for edge-signing workflow state
+        self.dwsreq = koming.Komer(
+            db=self,
+            subkey="dwsreq.",
+            schema=DidWebsSetupRecord,
+        )
 
 
 class Seeker(dbing.LMDBer):

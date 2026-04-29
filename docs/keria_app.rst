@@ -8,7 +8,7 @@ keria.app.agenting
     :members:
 
 Agency and Agent Configuration
-===================
+==============================
 
 A KERIA Agency can be configured with either environment variables or a configuration file.
 The configuration file is a JSON file. Both alternatives are shown here.
@@ -83,6 +83,102 @@ keria.app.aiding
 ----------------
 
 .. automodule:: keria.app.aiding
+    :members:
+
+keria.app.streaming
+-------------------
+
+``keria.app.streaming`` is the generic KERIA agent-to-edge signaling layer. It
+registers the authenticated admin ``GET /signals/stream`` endpoint and provides
+the reusable cueing helpers that topic modules use to request signed SSE events.
+
+The important ownership boundary is this:
+
+- ``SseBroadcaster`` is passive per-agent fan-out to currently connected
+  subscribers.
+- ``Agent`` owns the stable ``SseBroadcaster`` and the shared signal cue deck.
+- ``SseBroadcasterDoer`` is the active cue-draining publisher. It signs queued
+  payloads with ``agent.agentHab`` and broadcasts the resulting KERI ``rpy``
+  envelope to the Agent-owned broadcaster.
+- Topic modules own durable state, polling fallbacks, event names, reply routes,
+  payload semantics, and enqueueing decisions.
+
+The stream is intentionally transient. A disconnected client can miss events,
+so every topic that requires reliability must expose a durable read path. For
+did:webs publication that read path is ``/didwebs/signing/requests``.
+Repeated SSE messages are allowed; clients must dedupe using the topic's stable
+event identifier. For did:webs, that identifier is the setup request SAID
+(``request.d``).
+
+SSE event data is a signed reply envelope:
+
+.. code-block:: json
+
+    {
+      "rpy": {
+        "v": "...",
+        "t": "rpy",
+        "d": "...",
+        "dt": "...",
+        "r": "/topic/reply/route",
+        "a": {
+          "agent": "KERIA agent AID",
+          "topic": "payload fields"
+        }
+      },
+      "sigs": ["agent signature"]
+    }
+
+Clients should verify the signature against the connected KERIA agent AID and,
+when the caller expects one topic, check the ``r`` route before interpreting the
+payload.
+
+.. automodule:: keria.app.streaming
+    :members:
+
+keria.app.didwebing
+-------------------
+
+``keria.app.didwebing`` uses the generic signaling layer; it does not own SSE
+transport. Its durable contract is did:webs-specific:
+
+- dynamic public ``did.json`` and ``keri.cesr`` asset generation;
+- durable managed-AID signing requests under ``/didwebs/signing/requests``;
+- did:webs approval payloads for registry creation and designated-alias ACDC
+  issuance.
+
+The signed admin status route under ``/didwebs/{aid}`` is debug-only,
+informational maintainer surface. It is not a Signify client workflow contract
+and may be removed once end-to-end VC-JWT presentation to a W3C verifier no
+longer needs that local inspection hook.
+
+KERIA may self-issue for its own agent AID because it owns ``agent.agentHab``.
+For Signify-managed AIDs, KERIA coordinates publication but must not sign as the
+managed AID. It emits a signed generic signal and keeps a durable polling record
+so SignifyPy or SignifyTS can verify the agent request, sign at the edge, submit
+the resulting events through normal KERIA APIs, and recover from missed SSE
+events.
+
+The managed-AID publisher has three separate state channels:
+
+- ``AgencyBaser.dwspub`` is durable publication work keyed by managed AID. It is
+  the source of truth for which AIDs should be advanced toward did:webs
+  publication readiness.
+- ``AgencyBaser.dwsreq`` is durable edge-client setup work keyed by request
+  SAID. It is the source of truth for polling and for client-side dedupe.
+- The generic signal cue deck is transient live notification intent. The
+  publisher queues a cue when it wants connected clients to notice a durable
+  setup request or ready transition; ``SseBroadcasterDoer`` signs and broadcasts
+  it later.
+
+``DidWebsAidPublisher`` may see the same pending request on every recurrence
+while waiting for the edge client to create a registry or issue the
+designated-alias ACDC. It therefore throttles repeated SSE nudges in memory.
+That throttle is not durable: after restart, KERIA may signal pending requests
+again, and Signify clients are expected to suppress duplicate approvals by
+request SAID.
+
+.. automodule:: keria.app.didwebing
     :members:
 
 keria.app.credentialing
