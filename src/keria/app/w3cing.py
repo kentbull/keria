@@ -519,10 +519,12 @@ def cloneCredential(agent, said: str):
 
 
 def validateProjectionCredential(agent, aid: str, creder):
-    """Require an active, issuer-owned VRD ACDC for Phase 4 projection."""
-    if creder.issuer != aid:
+    """Require an active VRD ACDC owned by the issuer or holder presenter."""
+    subject = creder.sad.get("a", {}) if isinstance(creder.sad, dict) else {}
+    holder = subject.get("i") if isinstance(subject, dict) else None
+    if creder.issuer != aid and holder != aid:
         raise falcon.HTTPBadRequest(
-            description="W3C projection requires the selected identifier to be the credential issuer"
+            description="W3C projection requires the selected identifier to be the credential issuer or holder"
         )
     if creder.schema != VRD_SCHEMA:
         raise falcon.HTTPBadRequest(
