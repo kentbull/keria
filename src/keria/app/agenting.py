@@ -732,7 +732,6 @@ class Agent(doing.DoDoer):
         )
         self.didWebsConfig = didwebing.configFromSources({}, cf=self.hby.cf)
         self.adb = self.agency.adb
-        self.didWebsAgentPublisher = None
         self.didWebsManagedPublisher = None
         self.sseBroadcasterDoer = streaming.SseBroadcasterDoer(
             agent=self,
@@ -878,11 +877,6 @@ class Agent(doing.DoDoer):
             ]
         )
         if self.didWebsConfig.enabled and self.didWebsConfig.auto_issue:
-            self.didWebsAgentPublisher = didwebing.DidWebsAgentPublisher(
-                agent=self,
-                config=self.didWebsConfig,
-                tock=self.tocks.get("didWebsAgentPublisher", 0.0),
-            )
             self.didWebsManagedPublisher = didwebing.DidWebsAidPublisher(
                 agent=self,
                 config=self.didWebsConfig,
@@ -890,7 +884,7 @@ class Agent(doing.DoDoer):
                 signalCues=self.signalCues,
                 tock=self.tocks.get("didWebsManagedPublisher", 0.0),
             )
-            doers.extend([self.didWebsAgentPublisher, self.didWebsManagedPublisher])
+            doers.append(self.didWebsManagedPublisher)
 
         super(Agent, self).__init__(doers=doers, **opts)
 
@@ -935,15 +929,6 @@ class Agent(doing.DoDoer):
             self.shutdownAgent()  # will call exit so no need to return
             return True  # never gets here since shutdownAgent triggers exit
         super(Agent, self).recur(tyme=tyme)
-        # remove agent did:webs publisher after it is done. No need to re-run it.
-        # TODO maybe it is sufficient to just return True
-        if (
-            self.didWebsAgentPublisher is not None
-            and self.didWebsAgentPublisher.done is True
-        ):
-            if self.didWebsAgentPublisher in self.doers:
-                self.remove([self.didWebsAgentPublisher])
-            self.didWebsAgentPublisher = None
         return False
 
     def shutdownAgent(self):
