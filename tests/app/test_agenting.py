@@ -33,8 +33,22 @@ from keri.help import nowIso8601
 from keri.vdr import credentialing
 
 from keria.app import agenting, aiding
+from keria.app.cli.commands import start
 from keria.core import longrunning, httping
 from keria.testing.testing_helper import SCRIPTS_DIR
+
+
+def test_start_cors_defaults_to_enabled(monkeypatch):
+    monkeypatch.delenv("KERI_AGENT_CORS", raising=False)
+    assert start.getBoolVariable("KERI_AGENT_CORS", default=True) is True
+
+
+def test_start_cors_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("KERI_AGENT_CORS", "false")
+    assert start.getBoolVariable("KERI_AGENT_CORS", default=True) is False
+
+    monkeypatch.setenv("KERI_AGENT_CORS", "0")
+    assert start.getBoolVariable("KERI_AGENT_CORS", default=True) is False
 
 
 def test_setup_no_http():

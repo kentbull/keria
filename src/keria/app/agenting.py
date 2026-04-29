@@ -58,7 +58,16 @@ from keri.app import challenging
 
 from keria.utils.openapi import dataclassFromFielddom
 
-from . import aiding, notifying, indirecting, credentialing, ipexing, delegating, didwebing
+from . import (
+    aiding,
+    notifying,
+    indirecting,
+    credentialing,
+    ipexing,
+    delegating,
+    didwebing,
+    streaming,
+)
 from . import grouping as keriagrouping
 from .serving import GracefulShutdownDoer
 from .. import log_name, ogler, set_log_level
@@ -671,6 +680,8 @@ class Agent(doing.DoDoer):
         self.grants = decking.Deck()
         self.admits = decking.Deck()
         self.submits = decking.Deck()
+        self.signalCues = decking.Deck()
+        self.sseBroadcaster = streaming.SseBroadcaster()
 
         receiptor = agenting.Receiptor(hby=hby)
         self.witq = agenting.WitnessInquisitor(hby=self.hby)
@@ -720,7 +731,15 @@ class Agent(doing.DoDoer):
             notifier=self.notifier,
         )
         self.didWebsConfig = didwebing.configFromSources({}, cf=self.hby.cf)
-        self.didWebsPublisher = None
+        self.adb = self.agency.adb
+        self.didWebsAgentPublisher = None
+        self.didWebsManagedPublisher = None
+        self.sseBroadcasterDoer = streaming.SseBroadcasterDoer(
+            agent=self,
+            cues=self.signalCues,
+            broadcaster=self.sseBroadcaster,
+            tock=self.tocks.get("sseBroadcaster", 0.0),
+        )
 
         self.seeker = basing.Seeker(
             name=hby.name,
@@ -854,16 +873,24 @@ class Agent(doing.DoDoer):
                     queries=self.queries,
                     tock=self.tocks.get("exchangecue", 0.0),
                 ),
+                self.sseBroadcasterDoer,
                 self.submitter,
             ]
         )
         if self.didWebsConfig.enabled and self.didWebsConfig.auto_issue:
-            self.didWebsPublisher = didwebing.DidWebsPublisherDoer(
+            self.didWebsAgentPublisher = didwebing.DidWebsAgentPublisher(
                 agent=self,
                 config=self.didWebsConfig,
-                tock=self.tocks.get("didWebsPublisher", 1.0),
+                tock=self.tocks.get("didWebsAgentPublisher", 0.0),
             )
-            doers.append(self.didWebsPublisher)
+            self.didWebsManagedPublisher = didwebing.DidWebsAidPublisher(
+                agent=self,
+                config=self.didWebsConfig,
+                adb=self.adb,
+                signalCues=self.signalCues,
+                tock=self.tocks.get("didWebsManagedPublisher", 0.0),
+            )
+            doers.extend([self.didWebsAgentPublisher, self.didWebsManagedPublisher])
 
         super(Agent, self).__init__(doers=doers, **opts)
 
@@ -908,10 +935,15 @@ class Agent(doing.DoDoer):
             self.shutdownAgent()  # will call exit so no need to return
             return True  # never gets here since shutdownAgent triggers exit
         super(Agent, self).recur(tyme=tyme)
-        if self.didWebsPublisher is not None and self.didWebsPublisher.done is True:
-            if self.didWebsPublisher in self.doers:
-                self.remove([self.didWebsPublisher])
-            self.didWebsPublisher = None
+        # remove agent did:webs publisher after it is done. No need to re-run it.
+        # TODO maybe it is sufficient to just return True
+        if (
+            self.didWebsAgentPublisher is not None
+            and self.didWebsAgentPublisher.done is True
+        ):
+            if self.didWebsAgentPublisher in self.doers:
+                self.remove([self.didWebsAgentPublisher])
+            self.didWebsAgentPublisher = None
         return False
 
     def shutdownAgent(self):
@@ -988,6 +1020,7 @@ def createAdminServerDoer(config: KERIAServerConfig, agency: Agency):
 
     keriaexchanging.loadEnds(app=adminApp)
     ipexing.loadEnds(app=adminApp)
+    streaming.loadEnds(app=adminApp)
     didwebing.loadAdminEnds(
         app=adminApp,
         config=didwebing.configFromSources(
