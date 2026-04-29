@@ -7,33 +7,13 @@ import json
 
 import falcon
 import pytest
-from hio.base import doing
 from keri.app import configing
 from keri.core import coring, eventing, indexing, parsing, serdering
 from keri.core.eventing import SealEvent
 from keri.vc import proving
 
 from keria.app import aiding, didwebing
-
-
-def add_agent_delegation_source_seal(agent, helpers):
-    controller, signers = helpers.incept(
-        bran=b"0123456789abcdefghijk",
-        stem="signify:controller",
-        pidx=0,
-    )
-    assert controller.pre == agent.caid
-    seal = {"i": agent.agentHab.pre, "s": "0", "d": agent.agentHab.kever.serder.said}
-    ixn = eventing.interact(
-        pre=agent.caid,
-        sn="1",
-        dig=agent.hby.kevers[agent.caid].serder.said,
-        data=[seal],
-    )
-    sigers = [signers[0].sign(ser=ixn.raw, index=0)]
-    ims = eventing.messagize(ixn, sigers=sigers)
-    parsing.Parser(kvy=agent.hby.kvy).parseOne(ims=ims)
-    aiding.AgentResourceEnd.anchorSeals(agent, ixn)
+from keria.db import basing
 
 
 def test_config_from_sources_prefers_env(monkeypatch):
@@ -118,12 +98,8 @@ def test_agent_adds_publisher_doers_when_did_webs_auto_issue_enabled(helpers):
         assert agent.didWebsConfig.enabled is True
         assert agent.didWebsConfig.auto_issue is True
         assert isinstance(
-            agent.didWebsAgentPublisher, didwebing.DidWebsAgentPublisher
-        )
-        assert isinstance(
             agent.didWebsManagedPublisher, didwebing.DidWebsAidPublisher
         )
-        assert agent.didWebsAgentPublisher in agent.doers
         assert agent.didWebsManagedPublisher in agent.doers
         assert agent.didWebsManagedPublisher.signalCues is agent.signalCues
 
@@ -198,6 +174,37 @@ def test_aid_creation_tracks_managed_publication_work(helpers):
         didwebing.trackManagedAidPublication(agent, "aid1", aid)
         records = list(agent.adb.dwspub.getItemIter())
         assert len(records) == 1
+
+
+def test_managed_publisher_ignores_stale_agent_aid_publication_work(helpers):
+    config = didwebing.DidWebsConfig(
+        enabled=True, domain="127.0.0.1", host="127.0.0.1", port=3902, path="dws"
+    )
+
+    with helpers.openKeria() as (_agency, agent, _app, _client):
+        aid = agent.agentHab.pre
+        record = basing.DidWebsPubRecord(
+            aid=aid,
+            name="agent",
+            agent=aid,
+            did=didwebing.didForAid(config, aid),
+            registryName=didwebing.registryName(config, aid),
+            state=didwebing.DWS_PUB_SIGREQ,
+            created="2025-01-01T00:00:00.000000+00:00",
+            updated="2025-01-01T00:00:00.000000+00:00",
+        )
+        agent.adb.dwspub.pin(keys=(aid,), val=record)
+
+        publisher = didwebing.DidWebsAidPublisher(
+            agent=agent, config=config, signalCues=agent.signalCues
+        )
+        assert aid not in publisher.active
+
+        publisher.enqueue("agent", aid)
+        publisher.recur(0)
+
+        assert aid not in publisher.active
+        assert len(agent.signalCues) == 0
 
 
 def test_status_route_reports_optional_missing_alias_acdc(
@@ -312,113 +319,6 @@ def test_status_route_projects_durable_publication_state_without_registry_scan(
 
         assert result.status == falcon.HTTP_200
         assert result.json["publicationState"] == didwebing.DWS_PUB_REGWAIT
-
-
-def test_publisher_waits_for_agent_delegation_source_seal(helpers):
-    config = didwebing.DidWebsConfig(
-        enabled=True, domain="127.0.0.1", host="127.0.0.1", port=3902, path="dws"
-    )
-
-    with helpers.openKeria() as (_agency, agent, _app, _client):
-        publisher = didwebing.DidWebsAgentPublisher(agent=agent, config=config)
-
-        publisher.recur(0)
-
-        assert publisher.state == didwebing.DWS_PUB_DELWAIT
-        assert (
-            agent.rgy.registryByName(
-                didwebing.registryName(config, agent.agentHab.pre)
-            )
-            is None
-        )
-
-
-def test_publisher_self_issues_agent_designated_alias_acdc(helpers):
-    config = didwebing.DidWebsConfig(
-        enabled=True, domain="127.0.0.1", host="127.0.0.1", port=3902, path="dws"
-    )
-
-    with helpers.openKeria() as (_agency, agent, _app, _client):
-        add_agent_delegation_source_seal(agent, helpers)
-        publisher = didwebing.DidWebsAgentPublisher(agent=agent, config=config)
-
-        done = False
-        for _ in range(10):
-            done = publisher.recur(0)
-            if done:
-                break
-
-        aid = agent.agentHab.pre
-        status = didwebing.statusForAid(agent, config, aid)
-        registry = agent.rgy.registryByName(didwebing.registryName(config, aid))
-        credentials = didwebing.getSelfIssuedAcdcs(aid, agent.rgy.reger)
-
-        assert publisher.state == didwebing.DWS_PUB_RDY
-        assert done is True
-        assert status["publicationState"] == didwebing.DWS_PUB_RDY
-        assert status["designatedAliasAvailable"] is True
-        assert registry is not None
-        assert len(credentials) == 1
-        assert didwebing.didJson(agent, config, aid)["alsoKnownAs"] == status[
-            "credentialData"
-        ]["ids"]
-        assert credentials[0].qb64.encode("utf-8") in didwebing.keriCesr(
-            agent, config, aid
-        )
-
-        registry_count = len(list(agent.rgy.reger.regs.getItemIter()))
-        credential_count = len(didwebing.getSelfIssuedAcdcs(aid, agent.rgy.reger))
-
-        for _ in range(3):
-            publisher.recur(0)
-
-        assert len(list(agent.rgy.reger.regs.getItemIter())) == registry_count
-        assert (
-            len(didwebing.getSelfIssuedAcdcs(aid, agent.rgy.reger))
-            == credential_count
-        )
-
-
-def test_agent_removes_did_webs_publisher_after_success(helpers, monkeypatch):
-    cf = configing.Configer(name="keria", temp=True, reopen=True, clear=True)
-    cf.put(
-        {
-            "did_webs": {
-                "enabled": True,
-                "domain": "127.0.0.1",
-                "host": "127.0.0.1",
-                "port": 3902,
-                "path": "dws",
-            }
-        }
-    )
-    calls = []
-
-    def publish_ready(_agent, _config):
-        calls.append((_agent, _config))
-        return didwebing.DWS_PUB_RDY
-
-    monkeypatch.setattr(didwebing, "ensureAgentDesignatedAlias", publish_ready)
-
-    with helpers.openKeria(cf=cf) as (_agency, agent, _app, _client):
-        publisher = agent.didWebsAgentPublisher
-        assert isinstance(publisher, didwebing.DidWebsAgentPublisher)
-        assert publisher in agent.doers
-
-        doist = doing.Doist(tock=0.03125)
-        deeds = doist.enter(doers=[agent])
-        try:
-            for _ in range(3):
-                doist.recur(deeds=deeds)
-
-            assert publisher.done is True
-            assert publisher not in agent.doers
-            assert agent.didWebsAgentPublisher is None
-            assert agent.didWebsManagedPublisher in agent.doers
-            assert all(deed[2] is not publisher for deed in agent.deeds)
-            assert len(calls) == 1
-        finally:
-            doist.exit(deeds=deeds)
 
 
 def test_managed_publisher_creates_registry_signing_request_without_endrole(
@@ -736,9 +636,7 @@ def test_asset_routes_return_generated_material_when_available(helpers, monkeypa
         assert cesr_result.content.endswith(b"alias-cesr")
 
 
-def test_asset_routes_return_material_for_stored_agent_designated_alias_acdc(
-    helpers,
-):
+def test_asset_routes_reject_agent_aid_even_with_designated_alias_acdc(helpers):
     config = didwebing.DidWebsConfig(
         enabled=True, domain="127.0.0.1", host="127.0.0.1", port=3902, path="dws"
     )
@@ -804,50 +702,8 @@ def test_asset_routes_return_material_for_stored_agent_designated_alias_acdc(
             keys=didwebing.DES_ALIASES_SCHEMA.encode("utf-8"), val=credential_said
         )
 
-        did_result = client.simulate_get(f"/dws/{aid}/did.json")
-        cesr_result = client.simulate_get(f"/dws/{aid}/keri.cesr")
-
-        assert did_result.status == falcon.HTTP_200
-        assert did_result.json["id"] == f"did:web:127.0.0.1%3A3902:dws:{aid}"
-        assert did_result.json["alsoKnownAs"] == data["ids"]
-        assert cesr_result.status == falcon.HTTP_200
-        assert creder.said.encode("utf-8") in cesr_result.content
-
-
-def test_asset_routes_can_serve_agent_aid_when_available(helpers, monkeypatch):
-    config = didwebing.DidWebsConfig(
-        enabled=True, domain="127.0.0.1", host="127.0.0.1", port=3902, path="dws"
-    )
-
-    with helpers.openKeria() as (agency, agent, app, client):
-        agency.adb.ctrl.pin(
-            keys=(agent.agentHab.pre,), val=coring.Prefixer(qb64=agent.caid)
-        )
-        didwebing.loadPublicEnds(app=app, agency=agency, config=config)
-
-        monkeypatch.setattr(
-            didwebing,
-            "matchingDesignatedAliases",
-            lambda _hby, _rgy, _aid, _did: [_did],
-        )
-        monkeypatch.setattr(
-            didwebing,
-            "genDesignatedAliases",
-            lambda _hby, _rgy, _aid: [didwebing.didForAid(config, agent.agentHab.pre)],
-        )
-        monkeypatch.setattr(
-            didwebing,
-            "genDesignatedAliasesCesr",
-            lambda _hab, _reger, _aid: bytearray(b"agent-alias-cesr"),
-        )
-
         did_result = client.simulate_get(f"/dws/{agent.agentHab.pre}/did.json")
         cesr_result = client.simulate_get(f"/dws/{agent.agentHab.pre}/keri.cesr")
 
-        assert did_result.status == falcon.HTTP_200
-        assert (
-            did_result.json["id"]
-            == f"did:web:127.0.0.1%3A3902:dws:{agent.agentHab.pre}"
-        )
-        assert cesr_result.status == falcon.HTTP_200
-        assert cesr_result.content.endswith(b"agent-alias-cesr")
+        assert did_result.status == falcon.HTTP_404
+        assert cesr_result.status == falcon.HTTP_404
