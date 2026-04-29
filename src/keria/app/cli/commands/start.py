@@ -13,7 +13,7 @@ import os
 from keri import __version__
 from keri import help
 
-from keria.app import agenting, didwebing
+from keria.app import agenting, didwebing, w3cing
 
 d = "Runs KERI Signify Agent\n"
 d += "\tExample:\nkli ahab\n"
@@ -159,6 +159,7 @@ def launch(args):
             iurls=getListVariable("KERIA_IURLS"),
             durls=getListVariable("KERIA_DURLS"),
             didWebs=didwebing.configFromEnvironment(),
+            w3cProjection=w3cing.configFromEnvironment(),
             bootPassword=args.bootPassword,
             bootUsername=args.bootUsername,
         )
