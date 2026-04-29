@@ -67,6 +67,7 @@ from . import (
     delegating,
     didwebing,
     streaming,
+    w3cing,
 )
 from . import grouping as keriagrouping
 from .serving import GracefulShutdownDoer
@@ -156,6 +157,8 @@ class KERIAServerConfig:
 
     # Optional did:webs dynamic asset hosting configuration.
     didWebs: dict = field(default_factory=dict)
+    # Optional ephemeral W3C VC-JWT projection workflow configuration.
+    w3cProjection: dict = field(default_factory=dict)
 
     # Experimental configuration
     # Experimental password for boot endpoint. Enables HTTP Basic Authentication for the boot endpoint. Only meant to be used for testing purposes.
@@ -240,6 +243,7 @@ class Agency(doing.DoDoer):
         iurls=None,
         durls=None,
         didWebs=None,
+        w3cProjection=None,
         cf=None,
     ):
         """
@@ -271,6 +275,7 @@ class Agency(doing.DoDoer):
         self.iurls = iurls
         self.durls = durls
         self.didWebs = didWebs
+        self.w3cProjection = w3cProjection
 
         if cf is None and self.configFile is not None:
             self.cf = configing.Configer(
@@ -336,6 +341,16 @@ class Agency(doing.DoDoer):
                 else dict(self.didWebs)
             )
             config["did_webs"] = {**config.get("did_webs", {}), **did_webs}
+        if self.w3cProjection:
+            w3c_projection = (
+                asdict(self.w3cProjection)
+                if isinstance(self.w3cProjection, w3cing.W3CProjectionConfig)
+                else dict(self.w3cProjection)
+            )
+            config["w3c_projection"] = {
+                **config.get("w3c_projection", {}),
+                **w3c_projection,
+            }
         return config
 
     def _writeAgentConfig(self, caid):
@@ -731,8 +746,10 @@ class Agent(doing.DoDoer):
             notifier=self.notifier,
         )
         self.didWebsConfig = didwebing.configFromSources({}, cf=self.hby.cf)
+        self.w3cProjectionConfig = w3cing.configFromSources({}, cf=self.hby.cf)
         self.adb = self.agency.adb
         self.didWebsManagedPublisher = None
+        self.w3cProjectionDoer = None
         self.sseBroadcasterDoer = streaming.SseBroadcasterDoer(
             agent=self,
             cues=self.signalCues,
@@ -885,6 +902,14 @@ class Agent(doing.DoDoer):
                 tock=self.tocks.get("didWebsManagedPublisher", 0.0),
             )
             doers.append(self.didWebsManagedPublisher)
+        if self.w3cProjectionConfig.enabled:
+            self.w3cProjectionDoer = w3cing.W3CProjectionDoer(
+                agent=self,
+                config=self.w3cProjectionConfig,
+                signalCues=self.signalCues,
+                tock=self.tocks.get("w3cProjection", 0.0),
+            )
+            doers.append(self.w3cProjectionDoer)
 
         super(Agent, self).__init__(doers=doers, **opts)
 
@@ -1012,6 +1037,10 @@ def createAdminServerDoer(config: KERIAServerConfig, agency: Agency):
             config.didWebs, cf=agency.cf, httpPort=config.httpPort
         ),
     )
+    w3cing.loadAdminEnds(
+        app=adminApp,
+        config=w3cing.configFromSources(config.w3cProjection, cf=agency.cf),
+    )
 
     adminServer = createHttpServer(
         config.adminPort, adminApp, config.keyPath, config.certPath, config.caFilePath
@@ -1069,6 +1098,7 @@ def createAgency(config: KERIAServerConfig, temp=False, cf=None):
         iurls=config.iurls,
         durls=config.durls,
         didWebs=config.didWebs,
+        w3cProjection=config.w3cProjection,
         temp=temp,
         cf=cf,
     )

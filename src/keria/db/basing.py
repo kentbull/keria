@@ -90,6 +90,62 @@ class DidWebsSetupRecord:
     error: str | None = None
 
 
+@dataclass
+class W3CProjectionRecord:
+    """Short-lived W3C VC-JWT projection session for one managed AID credential."""
+
+    d: str
+    aid: str
+    name: str
+    credentialSaid: str
+    issuerDid: str
+    verifierId: str
+    verifierUrl: str
+    statusBaseUrl: str
+    state: str
+    created: str
+    updated: str
+    expires: str
+    verificationMethod: str
+    unsignedVc: dict[str, Any]
+    proofConfig: dict[str, Any]
+    proofRequest: str | None = None
+    jwtRequest: str | None = None
+    proofSignature: str | None = None
+    jwtSignature: str | None = None
+    securedVc: dict[str, Any] | None = None
+    jwtHeader: dict[str, Any] | None = None
+    jwtPayload: dict[str, Any] | None = None
+    token: str | None = None
+    verifierStatus: int | None = None
+    verifierResponse: dict[str, Any] | str | None = None
+    error: str | None = None
+
+
+@dataclass
+class W3CSigningRequestRecord:
+    """Short-lived edge-signature request for a W3C projection session."""
+
+    d: str
+    session: str
+    type: str
+    kind: str
+    agent: str
+    aid: str
+    name: str
+    credentialSaid: str
+    signingInputB64: str
+    encoding: str
+    verificationMethod: str
+    state: str
+    created: str
+    updated: str
+    expires: str
+    signature: str | None = None
+    lastSignaled: str | None = None
+    error: str | None = None
+
+
 class AgencyBaser(dbing.LMDBer):
     """
     Agency database for tracking Agent tenants and their managed identifiers in this KERIA instance.
@@ -99,7 +155,7 @@ class AgencyBaser(dbing.LMDBer):
     TailDirPath = "keri/adb"
     AltTailDirPath = ".keri/adb"
     TempPrefix = "keri_adb_"
-    MaxNamedDBs = 10
+    MaxNamedDBs = 20
 
     def __init__(self, headDirPath=None, perm=None, reopen=False, **kwa):
         """
@@ -138,6 +194,12 @@ class AgencyBaser(dbing.LMDBer):
             .dwsreq values are DidWebsSetupRecord
                 keyed by request SAID.
                 Tracks durable did:webs setup requests awaiting edge signing.
+            .w3cproj values are W3CProjectionRecord
+                keyed by session SAID.
+                Tracks short-lived W3C projection sessions.
+            .w3creq values are W3CSigningRequestRecord
+                keyed by request SAID.
+                Tracks short-lived W3C projection edge-signature requests.
 
         Notes:
             dupsort=True for sub DB means allow unique (key,pair) duplicates at a key.
@@ -157,6 +219,8 @@ class AgencyBaser(dbing.LMDBer):
         self.aids = None
         self.dwspub = None
         self.dwsreq = None
+        self.w3cproj = None
+        self.w3creq = None
 
         super(AgencyBaser, self).__init__(
             headDirPath=headDirPath, perm=perm, reopen=reopen, **kwa
@@ -193,6 +257,20 @@ class AgencyBaser(dbing.LMDBer):
             db=self,
             subkey="dwsreq.",
             schema=DidWebsSetupRecord,
+        )
+
+        # Sub-database keyed by W3C projection session SAID for active/terminal short-lived session state
+        self.w3cproj = koming.Komer(
+            db=self,
+            subkey="w3cproj.",
+            schema=W3CProjectionRecord,
+        )
+
+        # Sub-database keyed by W3C signing request SAID for edge-signature workflow state
+        self.w3creq = koming.Komer(
+            db=self,
+            subkey="w3creq.",
+            schema=W3CSigningRequestRecord,
         )
 
 
