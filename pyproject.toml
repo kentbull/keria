@@ -46,8 +46,7 @@ keria = "keria.app.cli.keria:main"
 package = true
 
 [tool.uv.sources]
-keri = { path = "../keripy", editable = true }
-"vc-isomer" = { path = "../w3c-crosswalk", editable = true }
+"vc-isomer" = { path = "../../../interop/w3c-crosswalk", editable = true }
 
 [tool.setuptools.package-data]
 "keria.resources" = ["*.json"]

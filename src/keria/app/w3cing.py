@@ -17,7 +17,6 @@ import copy
 import json
 import os
 import urllib.error
-import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -26,6 +25,8 @@ from typing import Any
 import falcon
 from hio.base import doing
 from keri.core import coring
+from vc_isomer.common import canonicalize_did_webs
+from vc_isomer.constants import STATUS_TYPE
 from vc_isomer.data_integrity import (
     create_proof_configuration,
     create_verify_data,
@@ -40,7 +41,11 @@ from vc_isomer.jwt import (
 from vc_isomer.profile import VRD_SCHEMA, transpose_acdc_to_w3c_vc
 
 from .. import log_name, ogler
-from ..db.basing import W3CProjectionRecord, W3CSigningRequestRecord
+from ..db.basing import (
+    W3CProjectionRecord,
+    W3CSigningRequestRecord,
+    W3CStatusProjectionRecord,
+)
 from . import didwebing, streaming
 
 logger = ogler.getLogger(log_name)
@@ -49,6 +54,7 @@ W3C_SIG_ROUTE = "/w3c/signing/request"
 W3C_DONE_ROUTE = "/w3c/projection/complete"
 W3C_SIG_EVENT = "w3c.signing-request"
 W3C_DONE_EVENT = "w3c.projection.complete"
+W3C_STATUS_ROUTE_PREFIX = "/w3c/vc/status"
 
 W3C_KIND_PROOF = "data_integrity_proof"
 W3C_KIND_JWT = "vc_jwt"
@@ -72,6 +78,8 @@ W3C_STATE_EXPIRED = "expired"
 
 DEFAULT_TTL_SECONDS = 600
 DEFAULT_SIGNAL_INTERVAL = 30.0
+ACTIVE_TEL_ILKS = {coring.Ilks.iss, coring.Ilks.bis}
+REVOKED_TEL_ILKS = {coring.Ilks.rev, coring.Ilks.brv}
 
 
 class W3CProjectionError(ValueError):
@@ -116,6 +124,17 @@ def loadAdminEnds(app, config: W3CProjectionConfig):
     app.add_route(
         "/identifiers/{name}/w3c/signing-requests/{requestId}/signatures",
         W3CSigningRequestSignatureEnd(config),
+    )
+
+
+def loadPublicEnds(app, agency, config: W3CProjectionConfig):
+    """Register public W3C projection routes when the workflow is enabled."""
+    if not config.enabled:
+        return
+
+    app.add_route(
+        f"{W3C_STATUS_ROUTE_PREFIX}/{{credSaid}}",
+        W3CStatusResourceEnd(agency=agency),
     )
 
 
@@ -438,11 +457,20 @@ def createProjectionSession(
     now = utcTimestamp()
     expires = expiresAt(config.session_ttl_seconds)
     verification_method = f"{issuer_did}#{hab.kever.verfers[0].qb64}"
-    status_base_url = config.status_base_url or verifierBaseUrl(verifier.verifyUrl)
+    status_base_url = requireStatusBaseUrl(config)
+    pinStatusProjection(
+        agent=agent,
+        name=name,
+        aid=hab.pre,
+        credential_said=credentialSaid,
+        issuer_did=issuer_did,
+        status_base_url=status_base_url,
+        now=now,
+    )
     vc = transpose_acdc_to_w3c_vc(
         acdc,
         issuer_did=issuer_did,
-        status_base_url=status_base_url,
+        status_base_url=statusReferenceBaseUrl(status_base_url),
     )
     proof_config = create_proof_configuration(
         verification_method=verification_method,
@@ -477,6 +505,143 @@ def createProjectionSession(
     session.proofRequest = request.d
     agent.adb.w3cproj.put(keys=(session.d,), val=session)
     return session
+
+
+def requireStatusBaseUrl(config: W3CProjectionConfig) -> str:
+    """Return the configured public KERIA status base URL or reject projection."""
+    if config.status_base_url is None:
+        raise falcon.HTTPBadRequest(
+            description="w3c_projection.status_base_url is required for W3C projection"
+        )
+    return config.status_base_url
+
+
+def statusReferenceBaseUrl(base_url: str) -> str:
+    """Return the Isomer-compatible base that produces KERIA W3C status URLs."""
+    return f"{base_url.rstrip()}/w3c/vc"
+
+
+def statusResourceUrl(base_url: str, credential_said: str) -> str:
+    """Return the public KERIA W3C status resource URL for one credential."""
+    return f"{base_url.rstrip()}{W3C_STATUS_ROUTE_PREFIX}/{credential_said}"
+
+
+def pinStatusProjection(
+    *,
+    agent,
+    name: str,
+    aid: str,
+    credential_said: str,
+    issuer_did: str,
+    status_base_url: str,
+    now: str,
+) -> W3CStatusProjectionRecord:
+    """Persist public status lookup metadata for one W3C-projected credential."""
+    existing = agent.adb.w3cstat.get(keys=(credential_said,))
+    record = W3CStatusProjectionRecord(
+        credentialSaid=credential_said,
+        aid=aid,
+        name=name,
+        issuerDid=canonicalize_did_webs(issuer_did),
+        statusBaseUrl=status_base_url,
+        created=existing.created if existing is not None else now,
+        updated=now,
+    )
+    agent.adb.w3cstat.pin(keys=(credential_said,), val=record)
+    return record
+
+
+def projectCredentialStatus(agent, record: W3CStatusProjectionRecord) -> dict[str, Any]:
+    """Render current W3C-facing status from KERIA credential and TEL state."""
+    try:
+        creder, *_ = cloneCredential(agent, record.credentialSaid)
+    except falcon.HTTPError as exc:
+        raise W3CProjectionError(
+            f"credential {record.credentialSaid} is no longer available"
+        ) from exc
+
+    acdc = creder.sad
+    registry_said = getattr(creder, "regi", "") or acdc.get("ri")
+    if not registry_said:
+        raise W3CProjectionError(
+            f"credential {record.credentialSaid} does not reference a registry"
+        )
+
+    tever = registryTever(agent, registry_said)
+    if tever is None:
+        raise W3CProjectionError(
+            f"missing TEL registry state for credential {record.credentialSaid}: {registry_said}"
+        )
+
+    state = tever.vcState(record.credentialSaid)
+    if state is None:
+        raise W3CProjectionError(
+            f"missing accepted TEL state for credential {record.credentialSaid}"
+        )
+
+    ilk = telIlk(state)
+    if ilk not in ACTIVE_TEL_ILKS | REVOKED_TEL_ILKS:
+        raise W3CProjectionError(
+            f"unsupported TEL state {ilk!r} for credential {record.credentialSaid}"
+        )
+
+    return {
+        "id": statusResourceUrl(record.statusBaseUrl, record.credentialSaid),
+        "type": STATUS_TYPE,
+        "credSaid": record.credentialSaid,
+        "registry": registry_said,
+        "statusRegistryId": registry_said,
+        "schemaSaid": acdc.get("s", ""),
+        "issuerAid": acdc.get("i", getattr(creder, "issuer", "")),
+        "issuer": canonicalize_did_webs(record.issuerDid),
+        "revoked": ilk in REVOKED_TEL_ILKS,
+        "status": ilk,
+        "statusSaid": getattr(state, "d", getattr(state, "said", "")),
+        "statusSequence": anchorSequence(state, record.credentialSaid),
+        "statusDate": getattr(state, "dt", getattr(state, "date", "")),
+        "updatedAt": utcTimestamp(),
+    }
+
+
+def registryTever(agent, registry_said: str):
+    """Return the accepted TEL registry state table from KERIA Regery variants."""
+    tevers = getattr(agent.rgy, "tevers", None)
+    tever = tevers.get(registry_said) if hasattr(tevers, "get") else None
+    if tever is not None:
+        return tever
+
+    reger = getattr(agent.rgy, "reger", None)
+    reger_tevers = getattr(reger, "tevers", None)
+    return reger_tevers.get(registry_said) if hasattr(reger_tevers, "get") else None
+
+
+def telIlk(state) -> str | None:
+    """Return the TEL event type from either KERIpy or Isomer-normalized state."""
+    return getattr(state, "et", getattr(state, "ilk", None))
+
+
+def anchorSequence(state, credential_said: str) -> int:
+    """Return the KEL sequence number anchoring the latest TEL state."""
+    anchor = getattr(state, "a", None)
+    if isinstance(anchor, dict) and "s" in anchor:
+        return stateSequenceInt(anchor["s"])
+
+    sequence = getattr(state, "sequence", None)
+    if sequence is not None:
+        return stateSequenceInt(sequence)
+
+    raise W3CProjectionError(
+        f"missing KEL anchor sequence for credential {credential_said}"
+    )
+
+
+def stateSequenceInt(value: Any) -> int:
+    """Normalize KERI sequence values that may be int or lowercase hex strings."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return int(value, 16)
+    return int(value)
 
 
 def ensureSigningRequest(
@@ -544,12 +709,6 @@ def verifierById(config: W3CProjectionConfig, verifier_id: str) -> W3CVerifierCo
         if verifier.id == verifier_id:
             return verifier
     raise falcon.HTTPBadRequest(description=f"unknown W3C verifier {verifier_id}")
-
-
-def verifierBaseUrl(verify_url: str) -> str:
-    """Derive a status base URL from the verifier origin when none is configured."""
-    parsed = urllib.parse.urlparse(verify_url)
-    return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
 
 
 def iterRequests(agent, name: str | None = None, includeComplete=False):
@@ -713,6 +872,35 @@ class W3CProjectionResourceEnd:
         rep.status = falcon.HTTP_200
         rep.content_type = "application/json"
         rep.data = json.dumps(sessionResponse(session)).encode("utf-8")
+
+
+class W3CStatusResourceEnd:
+    """Public W3C credential status resource backed by live KERIA TEL state."""
+
+    def __init__(self, agency):
+        self.agency = agency
+
+    def on_get(self, req, rep, credSaid):
+        record = self.agency.adb.w3cstat.get(keys=(credSaid,))
+        if record is None:
+            raise falcon.HTTPNotFound(
+                description=f"W3C credential status {credSaid} not found"
+            )
+
+        agent = self.agency.lookup(record.aid)
+        if agent is None:
+            raise falcon.HTTPConflict(
+                description=f"W3C credential status owner {record.aid} is not available"
+            )
+
+        try:
+            body = projectCredentialStatus(agent, record)
+        except W3CProjectionError as exc:
+            raise falcon.HTTPConflict(description=str(exc)) from exc
+
+        rep.status = falcon.HTTP_200
+        rep.content_type = "application/json"
+        rep.data = json.dumps(body).encode("utf-8")
 
 
 class W3CSigningRequestCollectionEnd:

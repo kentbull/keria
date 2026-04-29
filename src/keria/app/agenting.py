@@ -1069,6 +1069,11 @@ def createHttpServerDoer(
             config.didWebs, cf=agency.cf, httpPort=config.httpPort
         ),
     )
+    w3cing.loadPublicEnds(
+        app=happ,
+        agency=agency,
+        config=w3cing.configFromSources(config.w3cProjection, cf=agency.cf),
+    )
 
     swagsink = http.serving.StaticSink(staticDirPath="./static")
     happ.add_sink(swagsink, prefix="/swaggerui")

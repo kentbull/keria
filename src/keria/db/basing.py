@@ -123,6 +123,19 @@ class W3CProjectionRecord:
 
 
 @dataclass
+class W3CStatusProjectionRecord:
+    """Durable lookup metadata for public W3C credential status projection."""
+
+    credentialSaid: str
+    aid: str
+    name: str
+    issuerDid: str
+    statusBaseUrl: str
+    created: str
+    updated: str
+
+
+@dataclass
 class W3CSigningRequestRecord:
     """Short-lived edge-signature request for a W3C projection session."""
 
@@ -197,6 +210,9 @@ class AgencyBaser(dbing.LMDBer):
             .w3cproj values are W3CProjectionRecord
                 keyed by session SAID.
                 Tracks short-lived W3C projection sessions.
+            .w3cstat values are W3CStatusProjectionRecord
+                keyed by credential SAID.
+                Tracks durable public W3C status projection lookups.
             .w3creq values are W3CSigningRequestRecord
                 keyed by request SAID.
                 Tracks short-lived W3C projection edge-signature requests.
@@ -220,6 +236,7 @@ class AgencyBaser(dbing.LMDBer):
         self.dwspub = None
         self.dwsreq = None
         self.w3cproj = None
+        self.w3cstat = None
         self.w3creq = None
 
         super(AgencyBaser, self).__init__(
@@ -264,6 +281,13 @@ class AgencyBaser(dbing.LMDBer):
             db=self,
             subkey="w3cproj.",
             schema=W3CProjectionRecord,
+        )
+
+        # Sub-database keyed by credential SAID for public W3C status projection lookup metadata.
+        self.w3cstat = koming.Komer(
+            db=self,
+            subkey="w3cstat.",
+            schema=W3CStatusProjectionRecord,
         )
 
         # Sub-database keyed by W3C signing request SAID for edge-signature workflow state

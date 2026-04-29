@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import falcon
 import pytest
 from keri.app import configing
+from keri.core import coring
 
 from keria.app import w3cing
 from keria.db import basing
@@ -35,6 +36,7 @@ def patch_projection_inputs(monkeypatch, agent, aid=None, creder=None):
         sad={
             "d": "credential-said",
             "i": aid,
+            "ri": "registry-said",
             "s": w3cing.VRD_SCHEMA,
             "a": {"i": aid},
         },
@@ -78,7 +80,13 @@ def projection_creder(
     said="credential-said",
 ):
     return SimpleNamespace(
-        sad={"d": said, "i": issuer, "s": schema, "a": {"i": holder}},
+        sad={
+            "d": said,
+            "i": issuer,
+            "ri": "registry-said",
+            "s": schema,
+            "a": {"i": holder},
+        },
         issuer=issuer,
         schema=schema,
         regi="registry-said",
@@ -127,12 +135,23 @@ def test_agency_baser_exposes_w3c_projection_stores(helpers):
             updated=session.updated,
             expires=session.expires,
         )
+        status = basing.W3CStatusProjectionRecord(
+            credentialSaid="credential-said",
+            aid="managed-aid",
+            name="aid1",
+            issuerDid="did:webs:example.com:dws:managed-aid",
+            statusBaseUrl="http://127.0.0.1:3902",
+            created="2025-01-01T00:00:00Z",
+            updated="2025-01-01T00:00:00Z",
+        )
 
         agency.adb.w3cproj.pin(keys=(session.d,), val=session)
         agency.adb.w3creq.pin(keys=(request.d,), val=request)
+        agency.adb.w3cstat.pin(keys=(status.credentialSaid,), val=status)
 
         assert agency.adb.w3cproj.get(keys=(session.d,)) == session
         assert agency.adb.w3creq.get(keys=(request.d,)) == request
+        assert agency.adb.w3cstat.get(keys=(status.credentialSaid,)) == status
 
 
 def test_config_from_sources_reads_config_file_and_env(helpers, monkeypatch):
@@ -178,12 +197,20 @@ def test_create_projection_session_stores_session_and_first_request(
             verifierId="isomer-local",
         )
         request = agent.adb.w3creq.get(keys=(session.proofRequest,))
+        status = agent.adb.w3cstat.get(keys=("credential-said",))
 
         assert agent.adb.w3cproj.get(keys=(session.d,)) == session
+        assert status.credentialSaid == "credential-said"
+        assert status.aid == aid
+        assert status.statusBaseUrl == "http://127.0.0.1:8787"
         assert session.aid == aid
         assert session.state == w3cing.W3C_STATE_PROOF
         assert session.issuerDid == f"did:webs:example.com:dws:{aid}"
         assert session.unsignedVc["id"] == "urn:said:credential-said"
+        assert (
+            session.unsignedVc["credentialStatus"]["id"]
+            == "http://127.0.0.1:8787/w3c/vc/status/credential-said"
+        )
         assert request.kind == w3cing.W3C_KIND_PROOF
         assert request.signingInputB64 == "cHJvb2YtYnl0ZXM"
 
@@ -210,6 +237,24 @@ def test_create_projection_session_can_use_holder_did_as_temporary_presenter(
         assert session.verificationMethod.startswith(
             f"did:webs:example.com:dws:{holder}#"
         )
+
+
+def test_create_projection_session_requires_status_base_url(helpers, monkeypatch):
+    with helpers.openKeria() as (_agency, agent, _app, _client):
+        patch_projection_inputs(monkeypatch, agent)
+        config = verifier_config()
+        config.status_base_url = None
+
+        with pytest.raises(falcon.HTTPBadRequest) as ex:
+            w3cing.createProjectionSession(
+                agent,
+                config,
+                name="aid1",
+                credentialSaid="credential-said",
+                verifierId="isomer-local",
+            )
+
+        assert "status_base_url is required" in ex.value.description
 
 
 def test_validate_projection_credential_accepts_issuer_or_holder():
@@ -248,6 +293,102 @@ def test_validate_projection_credential_rejects_inactive_credential():
         w3cing.validateProjectionCredential(agent, "Eholder", creder)
 
     assert "is not active" in ex.value.description
+
+
+@pytest.mark.parametrize(
+    ("ilk", "revoked"),
+    [
+        ("iss", False),
+        ("bis", False),
+        ("rev", True),
+        ("brv", True),
+    ],
+)
+def test_public_status_route_renders_live_tel_state(
+    helpers, monkeypatch, ilk, revoked
+):
+    aid = "E" + ("A" * 43)
+    with helpers.openKeria() as (agency, agent, app, client):
+        load_status_route(agency, agent, app, aid=aid)
+        creder = projection_creder(issuer=aid, holder=aid)
+        state = SimpleNamespace(
+            et=ilk,
+            d="status-said",
+            a={"s": 3},
+            dt="2025-01-01T00:00:00Z",
+        )
+
+        monkeypatch.setattr(
+            w3cing, "cloneCredential", lambda _agent, _said: (creder,)
+        )
+        monkeypatch.setattr(
+            w3cing,
+            "registryTever",
+            lambda _agent, _registry_said: SimpleNamespace(
+                vcState=lambda _said: state
+            ),
+        )
+
+        result = client.simulate_get("/w3c/vc/status/credential-said")
+
+        assert result.status == falcon.HTTP_200
+        assert (
+            result.json["id"]
+            == "http://status.example/w3c/vc/status/credential-said"
+        )
+        assert result.json["type"] == "KERICredentialStatus"
+        assert result.json["credSaid"] == "credential-said"
+        assert result.json["registry"] == "registry-said"
+        assert result.json["issuerAid"] == aid
+        assert result.json["issuer"] == f"did:webs:example.com:dws:{aid}"
+        assert result.json["revoked"] is revoked
+        assert result.json["status"] == ilk
+        assert result.json["statusSaid"] == "status-said"
+        assert result.json["statusSequence"] == 3
+        assert result.json["statusDate"] == "2025-01-01T00:00:00Z"
+
+
+def test_public_status_route_returns_404_for_never_projected_credential(helpers):
+    with helpers.openKeria() as (agency, _agent, app, client):
+        w3cing.loadPublicEnds(app, agency, verifier_config())
+
+        result = client.simulate_get("/w3c/vc/status/missing-said")
+
+        assert result.status == falcon.HTTP_404
+
+
+def test_public_status_route_returns_409_when_tel_state_is_missing(
+    helpers, monkeypatch
+):
+    aid = "E" + ("A" * 43)
+    with helpers.openKeria() as (agency, agent, app, client):
+        load_status_route(agency, agent, app, aid=aid)
+        creder = projection_creder(issuer=aid, holder=aid)
+        monkeypatch.setattr(
+            w3cing, "cloneCredential", lambda _agent, _said: (creder,)
+        )
+
+        result = client.simulate_get("/w3c/vc/status/credential-said")
+
+        assert result.status == falcon.HTTP_409
+        assert "missing TEL registry state" in result.json["description"]
+
+
+def load_status_route(agency, agent, app, *, aid):
+    agency.adb.aids.pin(keys=(aid,), val=coring.Prefixer(qb64=agent.caid))
+    agency.adb.w3cstat.pin(
+        keys=("credential-said",),
+        val=basing.W3CStatusProjectionRecord(
+            credentialSaid="credential-said",
+            aid=aid,
+            name="aid1",
+            issuerDid=f"did:webs:example.com:dws:{aid}",
+            statusBaseUrl="http://status.example",
+            created="2025-01-01T00:00:00Z",
+            updated="2025-01-01T00:00:00Z",
+        ),
+    )
+    w3cing.loadPublicEnds(app, agency, verifier_config())
 
 
 def test_create_projection_session_accepts_supported_verifier_kinds(

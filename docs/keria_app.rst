@@ -152,6 +152,24 @@ informational maintainer surface. It is not a Signify client workflow contract
 and may be removed once end-to-end VC-JWT presentation to a W3C verifier no
 longer needs that local inspection hook.
 
+keria.app.w3cing
+----------------
+
+``keria.app.w3cing`` coordinates managed-AID W3C VC-JWT projection. KERIA owns
+the managed AID, accepted credential, registry, and TEL state, so KERIA also
+owns the KERIA-homed credential status projection path. The public status
+resource is served from ``/w3c/vc/status/{credSaid}`` on the main HTTP server
+when W3C projection is enabled.
+
+``w3c_projection.status_base_url`` or
+``KERIA_W3C_PROJECTION_STATUS_BASE_URL`` must point at the public KERIA base
+URL used by verifiers. KERIA embeds
+``{status_base_url}/w3c/vc/status/{credSaid}`` in projected W3C credentials and
+renders the status document from live TEL state on each request. The local
+Isomer ``isomer status project`` and ``isomer status serve`` flow remains the
+KLI/local-Habery path; it is not the status projection path for KERIA-homed
+AIDs.
+
 KERIA may self-issue for its own agent AID because it owns ``agent.agentHab``.
 For Signify-managed AIDs, KERIA coordinates publication but must not sign as the
 managed AID. It emits a signed generic signal and keeps a durable polling record
