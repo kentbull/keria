@@ -42,6 +42,9 @@ def loadEnds(app, agency, authn):
     app.add_route("/identifiers/{name}/events", aidEnd)
     app.add_route("/identifiers/{name}/submit", aidEnd)
 
+    aidDwsEnd = IdentifierDwsResourceEnd()
+    app.add_route("/identifiers/{name}/dws", aidDwsEnd)
+
     aidOOBIsEnd = IdentifierOOBICollectionEnd()
     app.add_route("/identifiers/{name}/oobis", aidOOBIsEnd)
 
@@ -165,6 +168,7 @@ class AgentResourceResult:
     agent: KeyStateRecord
     controller: Controller
     pidx: int
+    dws: Optional[str] = None
     ridx: Optional[int] = None
     sxlt: Optional[str] = None
 
@@ -242,6 +246,7 @@ class AgentResourceEnd:
             agent=agentInceptionState(agent),
             controller=dict(state=state, ee=eserder.ked),
             pidx=pidx,
+            dws=didwebing.publishedDws(agent, agent.agentHab.pre),
         )
 
         if (sxlt := agent.mgr.sxlt) is not None:
@@ -1302,6 +1307,33 @@ class IdentifierResourceEnd:
 
         raise falcon.HTTPBadRequest(
             title=f"invalid identifier submitted, {name} has no witnesses"
+        )
+
+
+class IdentifierDwsResourceEnd:
+    """Resource class for retrieving one identifier's published did:webs DID."""
+
+    @staticmethod
+    def on_get(req, rep, name):
+        """Identifier did:webs GET endpoint."""
+        if not name:
+            raise falcon.HTTPBadRequest(description="name is required")
+
+        agent = req.context.agent
+        hab = (
+            agent.hby.habs[name]
+            if name in agent.hby.habs
+            else agent.hby.habByName(name)
+        )
+        if hab is None:
+            raise falcon.HTTPNotFound(
+                description=f"{name} is not a valid identifier name or prefix"
+            )
+
+        rep.status = falcon.HTTP_200
+        rep.content_type = "application/json"
+        rep.data = json.dumps({"dws": didwebing.publishedDws(agent, hab.pre)}).encode(
+            "utf-8"
         )
 
 

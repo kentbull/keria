@@ -996,6 +996,23 @@ def statusForAid(agent, config: DidWebsConfig, aid: str) -> dict:
     }
 
 
+def publishedDws(agent, aid: str) -> str | None:
+    """Return the public did:webs DID for one local AID only after publication."""
+    config = getattr(agent, "didWebsConfig", None)
+    if config is None or not config.enabled or not isLocalAid(agent, aid):
+        return None
+
+    try:
+        did = didForAid(config, aid)
+    except ArtifactUnavailable:
+        return None
+
+    if matchingDesignatedAliases(agent.hby, agent.rgy, aid, did):
+        return did
+
+    return None
+
+
 def isLocalAid(agent, aid: str) -> bool:
     """Return True when an AID is locally represented in this KERIA agent."""
     return aid in agent.hby.habs and aid in agent.hby.kevers
