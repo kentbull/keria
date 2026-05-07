@@ -13,7 +13,7 @@ import os
 from keri import __version__
 from keri import help
 
-from keria.app import agenting
+from keria.app import agenting, didwebing, w3cing
 
 d = "Runs KERI Signify Agent\n"
 d += "\tExample:\nkli ahab\n"
@@ -153,11 +153,13 @@ def launch(args):
             logLevel=args.loglevel,
             logFile=args.logfile,
             logRequests=args.logrequests if args.logrequests else False,
-            cors=os.getenv("KERI_AGENT_CORS", "false").lower() in ("true", "1"),
+            cors=getBoolVariable("KERI_AGENT_CORS", default=True),
             releaseTimeout=int(os.getenv("KERIA_RELEASER_TIMEOUT", "86400")),
             curls=getListVariable("KERIA_CURLS"),
             iurls=getListVariable("KERIA_IURLS"),
             durls=getListVariable("KERIA_DURLS"),
+            didWebs=didwebing.configFromEnvironment(),
+            w3cProjection=w3cing.configFromEnvironment(),
             bootPassword=args.bootPassword,
             bootUsername=args.bootUsername,
         )
@@ -168,3 +170,11 @@ def launch(args):
 def getListVariable(name):
     value = os.getenv(name)
     return value.split(";") if value else None
+
+
+def getBoolVariable(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    return value.strip().lower() in ("true", "1", "yes", "on")

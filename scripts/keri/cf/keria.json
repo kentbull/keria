@@ -12,5 +12,35 @@
   "tocks": {
     "initer": 0.0,
     "escrower": 1.0
+  },
+  "did_webs": {
+    "enabled": true,
+    "public_base_url": "http://127.0.0.1:3902/dws",
+    "meta": false
+  },
+  "w3c_projection": {
+    "enabled": true,
+    "session_ttl_seconds": 600,
+    "status_base_url": "http://127.0.0.1:3902",
+    "verifiers": [
+      {
+        "id": "isomer-python-local",
+        "label": "Isomer Python",
+        "kind": "isomer-python-vc-jwt",
+        "verifyUrl": "http://127.0.0.1:8788/verify/vc"
+      },
+      {
+        "id": "isomer-node-local",
+        "label": "Isomer Node",
+        "kind": "isomer-node-vc-jwt",
+        "verifyUrl": "http://127.0.0.1:8789/verify/vc"
+      },
+      {
+        "id": "isomer-go-local",
+        "label": "Isomer Go",
+        "kind": "isomer-go-vc-jwt",
+        "verifyUrl": "http://127.0.0.1:8790/verify/vc"
+      }
+    ]
   }
 }

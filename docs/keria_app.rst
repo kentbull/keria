@@ -85,6 +85,72 @@ keria.app.aiding
 .. automodule:: keria.app.aiding
     :members:
 
+keria.app.didwebing
+-------------------
+
+``keria.app.didwebing`` uses the generic signaling layer; it does not own SSE
+transport. Its durable contract is did:webs-specific:
+
+- dynamic public ``did.json`` and ``keri.cesr`` asset generation;
+- durable managed-AID signing requests under ``/didwebs/signing/requests``;
+- did:webs approval payloads for registry creation and designated-alias ACDC
+  issuance.
+
+The signed admin status route under ``/didwebs/{aid}`` is debug-only,
+informational maintainer surface. It is not a Signify client workflow contract
+and may be removed once end-to-end VC-JWT presentation to a W3C verifier no
+longer needs that local inspection hook.
+
+.. automodule:: keria.app.didwebing
+    :members:
+
+keria.app.w3cing
+----------------
+
+``keria.app.w3cing`` coordinates managed-AID W3C VC-JWT projection. KERIA owns
+the managed AID, accepted credential, registry, and TEL state, so KERIA also
+owns the KERIA-homed credential status projection path. The public status
+resource is served from ``/w3c/vc/status/{credSaid}`` on the main HTTP server
+when W3C projection is enabled.
+
+``w3c_projection.status_base_url`` or
+``KERIA_W3C_PROJECTION_STATUS_BASE_URL`` must point at the public KERIA base
+URL used by verifiers. KERIA embeds
+``{status_base_url}/w3c/vc/status/{credSaid}`` in projected W3C credentials and
+renders the status document from live TEL state on each request. The local
+Isomer ``isomer status project`` and ``isomer status serve`` flow remains the
+KLI/local-Habery path; it is not the status projection path for KERIA-homed
+AIDs.
+
+KERIA may self-issue for its own agent AID because it owns ``agent.agentHab``.
+For Signify-managed AIDs, KERIA coordinates publication but must not sign as the
+managed AID. It emits a signed generic signal and keeps a durable polling record
+so SignifyPy or SignifyTS can verify the agent request, sign at the edge, submit
+the resulting events through normal KERIA APIs, and recover from missed SSE
+events.
+
+The managed-AID publisher has three separate state channels:
+
+- ``AgencyBaser.dwspub`` is durable publication work keyed by managed AID. It is
+  the source of truth for which AIDs should be advanced toward did:webs
+  publication readiness.
+- ``AgencyBaser.dwsreq`` is durable edge-client setup work keyed by request
+  SAID. It is the source of truth for polling and for client-side dedupe.
+- The generic signal cue deck is transient live notification intent. The
+  publisher queues a cue when it wants connected clients to notice a durable
+  setup request or ready transition; ``SseBroadcasterDoer`` signs and broadcasts
+  it later.
+
+``DidWebsAidPublisher`` may see the same pending request on every recurrence
+while waiting for the edge client to create a registry or issue the
+designated-alias ACDC. It therefore throttles repeated SSE nudges in memory.
+That throttle is not durable: after restart, KERIA may signal pending requests
+again, and Signify clients are expected to suppress duplicate approvals by
+request SAID.
+
+.. automodule:: keria.app.w3cing
+    :members:
+
 keria.app.credentialing
 -----------------------
 
