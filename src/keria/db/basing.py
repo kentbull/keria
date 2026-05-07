@@ -6,6 +6,8 @@ keria.db.basing module
 """
 
 from dataclasses import dataclass
+from typing import Any
+
 from ordered_set import OrderedSet as oset
 
 from keri.core import coring
@@ -27,6 +29,136 @@ class IndexRecord:
     paths: list
 
 
+@dataclass
+class DidWebsPubRecord:
+    """Durable managed-AID did:webs publication work item."""
+
+    aid: str
+    name: str
+    agent: str
+    did: str
+    registryName: str
+    state: str
+    created: str
+    updated: str
+    error: str | None = None
+
+
+@dataclass
+class DidWebsSetupRecord:
+    """
+    Durable managed-AID did:webs publication setup request.
+
+    TODO: refactor to multiple event records. Too many concerns are coupled together here.
+    """
+
+    # Request SAID assigned by coring.Saider.saidify(...) from the full setup payload.
+    d: str
+    # SSE event/request type supplied by the managed publisher.
+    type: str
+    # Client action to perform: create_registry or issue_designated_alias.
+    action: str
+    # KERIA agent AID from agent.agentHab.pre; signs the request envelope.
+    agent: str
+    # Managed AID prefix from the durable publication work seeded at AID creation.
+    aid: str
+    # Local managed AID alias captured at AID creation; edge clients use it for Signify APIs.
+    name: str
+    # did:webs DID derived from didForAid(config, aid).
+    did: str
+    # Dedicated designated-alias registry name from registryName(config, aid).
+    registryName: str
+    # Pinned designated-alias schema SAID from DES_ALIASES_SCHEMA.
+    schema: str
+    # Designated-alias credential subject from aliasCredentialData(config, aid).
+    credentialData: dict[str, Any]
+    # Designated-alias rules copied from DES_ALIASES_RULES.
+    rules: dict[str, Any]
+    # Public did.json URL returned by assetUrls(config, aid).
+    didJsonUrl: str
+    # Public keri.cesr URL returned by assetUrls(config, aid).
+    keriCesrUrl: str
+    # Setup request creation timestamp from helping.nowIso8601().
+    dt: str
+    # Registry SAID from registry.regk; present only for DA issuance requests.
+    registryId: str | None = None
+    # Durable workflow state; defaults pending and is completed by completeSigningRequests(...).
+    state: str = "pending"
+    # Last SSE queue timestamp set by DidWebsAidPublisher.signalRequest(...).
+    lastSignaled: str | None = None
+    # Optional failure text for failed setup requests; defaults to no error.
+    error: str | None = None
+
+
+@dataclass
+class W3CProjectionRecord:
+    """Short-lived W3C VC-JWT projection session for one managed AID credential."""
+
+    d: str
+    aid: str
+    name: str
+    credentialSaid: str
+    issuerDid: str
+    verifierId: str
+    verifierUrl: str
+    statusBaseUrl: str
+    state: str
+    created: str
+    updated: str
+    expires: str
+    verificationMethod: str
+    unsignedVc: dict[str, Any]
+    proofConfig: dict[str, Any]
+    proofRequest: str | None = None
+    jwtRequest: str | None = None
+    proofSignature: str | None = None
+    jwtSignature: str | None = None
+    securedVc: dict[str, Any] | None = None
+    jwtHeader: dict[str, Any] | None = None
+    jwtPayload: dict[str, Any] | None = None
+    token: str | None = None
+    verifierStatus: int | None = None
+    verifierResponse: dict[str, Any] | str | None = None
+    error: str | None = None
+
+
+@dataclass
+class W3CStatusProjectionRecord:
+    """Durable lookup metadata for public W3C credential status projection."""
+
+    credentialSaid: str
+    aid: str
+    name: str
+    issuerDid: str
+    statusBaseUrl: str
+    created: str
+    updated: str
+
+
+@dataclass
+class W3CSigningRequestRecord:
+    """Short-lived edge-signature request for a W3C projection session."""
+
+    d: str
+    session: str
+    type: str
+    kind: str
+    agent: str
+    aid: str
+    name: str
+    credentialSaid: str
+    signingInputB64: str
+    encoding: str
+    verificationMethod: str
+    state: str
+    created: str
+    updated: str
+    expires: str
+    signature: str | None = None
+    lastSignaled: str | None = None
+    error: str | None = None
+
+
 class AgencyBaser(dbing.LMDBer):
     """
     Agency database for tracking Agent tenants and their managed identifiers in this KERIA instance.
@@ -36,7 +168,7 @@ class AgencyBaser(dbing.LMDBer):
     TailDirPath = "keri/adb"
     AltTailDirPath = ".keri/adb"
     TempPrefix = "keri_adb_"
-    MaxNamedDBs = 10
+    MaxNamedDBs = 20
 
     def __init__(self, headDirPath=None, perm=None, reopen=False, **kwa):
         """
@@ -69,6 +201,21 @@ class AgencyBaser(dbing.LMDBer):
             .aids values are Prefixer of Controller AID (caid)
                 keyed by managed AID.
                 Maps managed AIDs to their Signify Controller AID (caid).
+            .dwspub values are DidWebsPubRecord
+                keyed by managed AID.
+                Tracks managed AIDs that KERIA should publish as did:webs DIDs.
+            .dwsreq values are DidWebsSetupRecord
+                keyed by request SAID.
+                Tracks durable did:webs setup requests awaiting edge signing.
+            .w3cproj values are W3CProjectionRecord
+                keyed by session SAID.
+                Tracks short-lived W3C projection sessions.
+            .w3cstat values are W3CStatusProjectionRecord
+                keyed by credential SAID.
+                Tracks durable public W3C status projection lookups.
+            .w3creq values are W3CSigningRequestRecord
+                keyed by request SAID.
+                Tracks short-lived W3C projection edge-signature requests.
 
         Notes:
             dupsort=True for sub DB means allow unique (key,pair) duplicates at a key.
@@ -86,6 +233,11 @@ class AgencyBaser(dbing.LMDBer):
         self.agnt = None
         self.ctrl = None
         self.aids = None
+        self.dwspub = None
+        self.dwsreq = None
+        self.w3cproj = None
+        self.w3cstat = None
+        self.w3creq = None
 
         super(AgencyBaser, self).__init__(
             headDirPath=headDirPath, perm=perm, reopen=reopen, **kwa
@@ -109,6 +261,41 @@ class AgencyBaser(dbing.LMDBer):
 
         # Sub-database keyed by qb64 AID mapping to the Prefixer object of the AID of its Agent
         self.aids = subing.CesrSuber(db=self, subkey="aids.", klas=coring.Prefixer)
+
+        # Sub-database keyed by managed AID for did:webs publication workflow state
+        self.dwspub = koming.Komer(
+            db=self,
+            subkey="dwspub.",
+            schema=DidWebsPubRecord,
+        )
+
+        # Sub-database keyed by did:webs setup request SAID for edge-signing workflow state
+        self.dwsreq = koming.Komer(
+            db=self,
+            subkey="dwsreq.",
+            schema=DidWebsSetupRecord,
+        )
+
+        # Sub-database keyed by W3C projection session SAID for active/terminal short-lived session state
+        self.w3cproj = koming.Komer(
+            db=self,
+            subkey="w3cproj.",
+            schema=W3CProjectionRecord,
+        )
+
+        # Sub-database keyed by credential SAID for public W3C status projection lookup metadata.
+        self.w3cstat = koming.Komer(
+            db=self,
+            subkey="w3cstat.",
+            schema=W3CStatusProjectionRecord,
+        )
+
+        # Sub-database keyed by W3C signing request SAID for edge-signature workflow state
+        self.w3creq = koming.Komer(
+            db=self,
+            subkey="w3creq.",
+            schema=W3CSigningRequestRecord,
+        )
 
 
 class Seeker(dbing.LMDBer):
