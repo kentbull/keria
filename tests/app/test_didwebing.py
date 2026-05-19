@@ -237,7 +237,7 @@ def test_status_route_reports_optional_missing_alias_acdc(
             result.json["keriCesrUrl"] == f"http://127.0.0.1:3902/dws/{aid}/keri.cesr"
         )
         assert (
-            result.json["registryName"] == f"{didwebing.DEFAULT_REGISTRY_PREFIX}:{aid}"
+            result.json["registryName"] == f"{didwebing.DEFAULT_REGISTRY_PREFIX}-{aid}"
         )
         assert result.json["schema"] == didwebing.DES_ALIASES_SCHEMA
         assert result.json["credentialData"] == {

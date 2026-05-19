@@ -49,7 +49,7 @@ DES_ALIASES_SCHEMA = "EN6Oh5XSD5_q2Hgu-aqpdfbVepdpYpFlgz6zvJL5b_r5"
 DES_ALIASES_RULES_FILE = "designated-aliases-rules.json"
 DES_ALIASES_PUBLIC_SCHEMA_FILE = "designated-aliases-public-schema.json"
 DEFAULT_PATH = "dws"
-DEFAULT_REGISTRY_PREFIX = "did:webs_designated_aliases"
+DEFAULT_REGISTRY_PREFIX = "didwebs-designated-aliases"
 
 # states for the did:webs publication of designated aliases self-attestation ACDC
 DWS_PUB_RDY = "ready"
@@ -233,7 +233,7 @@ def route_path(config: DidWebsConfig) -> str:
 
 def registryName(config: DidWebsConfig, aid: str) -> str:
     """Return the dedicated designated-alias registry name for one AID."""
-    return f"{config.registry_name_prefix}:{aid}"
+    return f"{config.registry_name_prefix}-{aid}"
 
 
 def didForAid(config: DidWebsConfig, aid: str) -> str:
