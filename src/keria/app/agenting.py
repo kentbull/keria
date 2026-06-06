@@ -65,7 +65,9 @@ from . import (
     credentialing,
     ipexing,
     delegating,
+    didwebing,
     streaming,
+    w3cing,
 )
 from . import grouping as keriagrouping
 from .serving import GracefulShutdownDoer
@@ -153,6 +155,11 @@ class KERIAServerConfig:
     # Data OOBI URLs resolved at startup of each Agent. For things like ACDC schemas, ACDCs (credentials), or other CESR streams.
     durls: List[str] = field(default_factory=list)
 
+    # Optional did:webs dynamic asset hosting configuration.
+    didWebs: dict = field(default_factory=dict)
+    # Optional holder-centered W3C credential workflow configuration.
+    w3c: dict = field(default_factory=dict)
+
     # Experimental configuration
     # Experimental password for boot endpoint. Enables HTTP Basic Authentication for the boot endpoint. Only meant to be used for testing purposes.
     bootPassword: str = None
@@ -235,6 +242,8 @@ class Agency(doing.DoDoer):
         curls=None,
         iurls=None,
         durls=None,
+        didWebs=None,
+        w3c=None,
         cf=None,
     ):
         """
@@ -265,6 +274,8 @@ class Agency(doing.DoDoer):
         self.curls = curls
         self.iurls = iurls
         self.durls = durls
+        self.didWebs = didWebs
+        self.w3c = w3c
 
         if cf is None and self.configFile is not None:
             self.cf = configing.Configer(
@@ -323,6 +334,16 @@ class Agency(doing.DoDoer):
 
         if self.durls is not None and isinstance(self.durls, list):
             config["durls"] = config["durls"] + self.durls
+        if self.didWebs:
+            did_webs = (
+                asdict(self.didWebs)
+                if isinstance(self.didWebs, didwebing.DidWebsConfig)
+                else dict(self.didWebs)
+            )
+            config["did_webs"] = {**config.get("did_webs", {}), **did_webs}
+        if self.w3c:
+            w3c = asdict(self.w3c) if isinstance(self.w3c, w3cing.W3CConfig) else dict(self.w3c)
+            config["w3c"] = {**config.get("w3c", {}), **w3c}
         return config
 
     def _writeAgentConfig(self, caid):
@@ -718,6 +739,10 @@ class Agent(doing.DoDoer):
             verifier=self.verifier,
             notifier=self.notifier,
         )
+        self.didWebsConfig = didwebing.configFromSources({}, cf=self.hby.cf)
+        self.w3cConfig = w3cing.configFromSources({}, cf=self.hby.cf)
+        self.adb = self.agency.adb
+        self.w3cDoer = None
         self.sseBroadcasterDoer = streaming.SseBroadcasterDoer(
             agent=self,
             cues=self.signalCues,
@@ -743,6 +768,7 @@ class Agent(doing.DoDoer):
         grouping.loadHandlers(exc=self.exc, mux=self.mux)
         delegating.loadHandlers(hby=self.hby, exc=self.exc, notifier=self.notifier)
         protocoling.loadHandlers(hby=self.hby, exc=self.exc, notifier=self.notifier)
+        w3cing.loadHandlers(agent=self, exc=self.exc, config=self.w3cConfig)
         self.submitter = Submitter(
             hby=hby, submits=self.submits, witRec=self.witSubmitDoer
         )
@@ -861,6 +887,14 @@ class Agent(doing.DoDoer):
                 self.submitter,
             ]
         )
+        if self.w3cConfig.enabled:
+            self.w3cDoer = w3cing.W3CDoer(
+                agent=self,
+                config=self.w3cConfig,
+                signalCues=self.signalCues,
+                tock=self.tocks.get("w3c", 0.0),
+            )
+            doers.append(self.w3cDoer)
 
         super(Agent, self).__init__(doers=doers, **opts)
 
@@ -982,6 +1016,10 @@ def createAdminServerDoer(config: KERIAServerConfig, agency: Agency):
     keriaexchanging.loadEnds(app=adminApp)
     ipexing.loadEnds(app=adminApp)
     streaming.loadEnds(app=adminApp)
+    w3cing.loadAdminEnds(
+        app=adminApp,
+        config=w3cing.configFromSources(config.w3c, cf=agency.cf),
+    )
 
     adminServer = createHttpServer(
         config.adminPort, adminApp, config.keyPath, config.certPath, config.caFilePath
@@ -1003,6 +1041,18 @@ def createHttpServerDoer(
 
     ending.loadEnds(agency=agency, app=happ)
     indirecting.loadEnds(agency=agency, app=happ)
+    didwebing.loadPublicEnds(
+        app=happ,
+        agency=agency,
+        config=didwebing.configFromSources(
+            config.didWebs, cf=agency.cf, httpPort=config.httpPort
+        ),
+    )
+    w3cing.loadPublicEnds(
+        app=happ,
+        agency=agency,
+        config=w3cing.configFromSources(config.w3c, cf=agency.cf),
+    )
 
     swagsink = http.serving.StaticSink(staticDirPath="./static")
     happ.add_sink(swagsink, prefix="/swaggerui")
@@ -1031,6 +1081,8 @@ def createAgency(config: KERIAServerConfig, temp=False, cf=None):
         curls=config.curls,
         iurls=config.iurls,
         durls=config.durls,
+        didWebs=config.didWebs,
+        w3c=config.w3c,
         temp=temp,
         cf=cf,
     )
