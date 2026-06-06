@@ -32,6 +32,14 @@ Agents act on behalf of their Signify clients. They don't have the secrets of th
 Agents use KERI HIO to handle all of the different asynchronous actions that are occuring. HIO is an efficient and scalable orchestration/processing mechanism that leverages queues, handlers, coroutines, etc.
 All Agent db access is through the associated Agent.
 
+### W3C Holder Workflow
+
+See `docs/w3c_holder_workflow.rst` for the W3C VRD issuance, holder import,
+presentation transaction, status projection, and troubleshooting guide. The
+short version: edge W3C packages build and sign VC-JWT and VP-JWT material;
+KERIA validates those artifacts, records state, forwards grants, submits
+presentations, and serves status.
+
 ## Development
 
 ### Setup
