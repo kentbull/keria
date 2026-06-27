@@ -342,7 +342,11 @@ class Agency(doing.DoDoer):
             )
             config["did_webs"] = {**config.get("did_webs", {}), **did_webs}
         if self.w3c:
-            w3c = asdict(self.w3c) if isinstance(self.w3c, w3cing.W3CConfig) else dict(self.w3c)
+            w3c = (
+                asdict(self.w3c)
+                if isinstance(self.w3c, w3cing.W3CConfig)
+                else dict(self.w3c)
+            )
             config["w3c"] = {**config.get("w3c", {}), **w3c}
         return config
 

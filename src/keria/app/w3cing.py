@@ -24,7 +24,11 @@ from keri.app import forwarding
 from keri.core import coring, eventing, serdering
 from vc_isomer.common import canonicalize_did_url, canonicalize_did_webs
 from vc_isomer.constants import EDDSA, STATUS_TYPE, VC_JWT_TYP, VP_JWT_TYP
-from vc_isomer.data_integrity import ED25519_MULTIKEY_PREFIX, encode_multibase_base58btc, verify_proof
+from vc_isomer.data_integrity import (
+    ED25519_MULTIKEY_PREFIX,
+    encode_multibase_base58btc,
+    verify_proof,
+)
 from vc_isomer.jwt import decode_jwt
 from vc_isomer.profile import VRD_SCHEMA, transpose_acdc_to_w3c_vc
 
@@ -84,20 +88,39 @@ def loadAdminEnds(app, config: W3CConfig):
 
     issuances = W3CIssuanceCollectionEnd(config)
     app.add_route("/identifiers/{name}/w3c/issuances", issuances)
-    app.add_route("/identifiers/{name}/w3c/issuances/{issuanceId}", W3CIssuanceResourceEnd(config))
-    app.add_route("/identifiers/{name}/w3c/issuances/{issuanceId}/vc-jwt", W3CIssuanceVcJwtEnd(config))
-    app.add_route("/identifiers/{name}/w3c/issuances/{issuanceId}/grant", W3CIssuanceGrantEnd(config))
+    app.add_route(
+        "/identifiers/{name}/w3c/issuances/{issuanceId}", W3CIssuanceResourceEnd(config)
+    )
+    app.add_route(
+        "/identifiers/{name}/w3c/issuances/{issuanceId}/vc-jwt",
+        W3CIssuanceVcJwtEnd(config),
+    )
+    app.add_route(
+        "/identifiers/{name}/w3c/issuances/{issuanceId}/grant",
+        W3CIssuanceGrantEnd(config),
+    )
 
-    app.add_route("/identifiers/{name}/w3c/credentials", W3CHeldCredentialCollectionEnd(config))
-    app.add_route("/identifiers/{name}/w3c/credentials/{credentialId}", W3CHeldCredentialResourceEnd(config))
+    app.add_route(
+        "/identifiers/{name}/w3c/credentials", W3CHeldCredentialCollectionEnd(config)
+    )
+    app.add_route(
+        "/identifiers/{name}/w3c/credentials/{credentialId}",
+        W3CHeldCredentialResourceEnd(config),
+    )
 
     contacts = W3CVerifierContactCollectionEnd(config)
     app.add_route("/identifiers/{name}/w3c/verifier-contacts", contacts)
-    app.add_route("/identifiers/{name}/w3c/verifier-contacts/{contactId}", W3CVerifierContactResourceEnd(config))
+    app.add_route(
+        "/identifiers/{name}/w3c/verifier-contacts/{contactId}",
+        W3CVerifierContactResourceEnd(config),
+    )
 
     presentations = W3CPresentationCollectionEnd(config)
     app.add_route("/identifiers/{name}/w3c/presentations", presentations)
-    app.add_route("/identifiers/{name}/w3c/presentations/{presentationId}", W3CPresentationResourceEnd(config))
+    app.add_route(
+        "/identifiers/{name}/w3c/presentations/{presentationId}",
+        W3CPresentationResourceEnd(config),
+    )
 
 
 def loadPublicEnds(app, agency, config: W3CConfig):
@@ -105,7 +128,9 @@ def loadPublicEnds(app, agency, config: W3CConfig):
     if not config.enabled:
         return
 
-    app.add_route(f"{W3C_STATUS_ROUTE_PREFIX}/{{credSaid}}", W3CStatusResourceEnd(agency=agency))
+    app.add_route(
+        f"{W3C_STATUS_ROUTE_PREFIX}/{{credSaid}}", W3CStatusResourceEnd(agency=agency)
+    )
 
 
 def loadHandlers(agent, exc, config: W3CConfig):
@@ -131,9 +156,12 @@ def configFromSources(config: Any, cf=None) -> W3CConfig:
     merged.update(configFromEnvironment())
     return W3CConfig(
         enabled=parseBool(merged.get("enabled", False)),
-        ttl_seconds=int(merged.get("ttl_seconds", DEFAULT_TTL_SECONDS) or DEFAULT_TTL_SECONDS),
+        ttl_seconds=int(
+            merged.get("ttl_seconds", DEFAULT_TTL_SECONDS) or DEFAULT_TTL_SECONDS
+        ),
         signal_interval_seconds=float(
-            merged.get("signal_interval_seconds", DEFAULT_SIGNAL_INTERVAL) or DEFAULT_SIGNAL_INTERVAL
+            merged.get("signal_interval_seconds", DEFAULT_SIGNAL_INTERVAL)
+            or DEFAULT_SIGNAL_INTERVAL
         ),
         status_base_url=emptyToNone(merged.get("status_base_url")),
     )
@@ -147,7 +175,9 @@ def configFromEnvironment() -> dict[str, Any]:
     if os.getenv("KERIA_W3C_TTL_SECONDS") is not None:
         config["ttl_seconds"] = os.getenv("KERIA_W3C_TTL_SECONDS")
     if os.getenv("KERIA_W3C_SIGNAL_INTERVAL_SECONDS") is not None:
-        config["signal_interval_seconds"] = os.getenv("KERIA_W3C_SIGNAL_INTERVAL_SECONDS")
+        config["signal_interval_seconds"] = os.getenv(
+            "KERIA_W3C_SIGNAL_INTERVAL_SECONDS"
+        )
     if os.getenv("KERIA_W3C_STATUS_BASE_URL") is not None:
         config["status_base_url"] = os.getenv("KERIA_W3C_STATUS_BASE_URL")
     return config
@@ -169,11 +199,20 @@ def emptyToNone(value: Any) -> str | None:
 
 
 def utcTimestamp() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def expiresAt(ttl: int) -> str:
-    return (datetime.now(timezone.utc).replace(microsecond=0) + timedelta(seconds=ttl)).isoformat().replace("+00:00", "Z")
+    return (
+        (datetime.now(timezone.utc).replace(microsecond=0) + timedelta(seconds=ttl))
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 class W3CDoer(doing.Doer):
@@ -191,7 +230,10 @@ class W3CDoer(doing.Doer):
             return False
         try:
             current = 0.0 if tyme is None else tyme
-            if self.lastGrantReconcileTyme is None or current - self.lastGrantReconcileTyme >= self.grantReconcileInterval:
+            if (
+                self.lastGrantReconcileTyme is None
+                or current - self.lastGrantReconcileTyme >= self.grantReconcileInterval
+            ):
                 self.lastGrantReconcileTyme = current
                 reconcileReceivedGrantExns(self.agent, self.config)
         except Exception:  # pragma: no cover - defensive runtime logging
@@ -199,11 +241,16 @@ class W3CDoer(doing.Doer):
         return False
 
 
-def startIssuance(agent, config: W3CConfig, issuerName: str, sourceCredentialSaid: str) -> W3CIssuanceRecord:
+def startIssuance(
+    agent, config: W3CConfig, issuerName: str, sourceCredentialSaid: str
+) -> W3CIssuanceRecord:
     """Create or resume issuer-side W3C issuance context for edge VC-JWT creation."""
     requireEnabled(config)
     for _keys, record in agent.adb.w3cissu.getItemIter():
-        if record.issuerName == issuerName and record.sourceCredentialSaid == sourceCredentialSaid:
+        if (
+            record.issuerName == issuerName
+            and record.sourceCredentialSaid == sourceCredentialSaid
+        ):
             return record
 
     hab = requireHab(agent, issuerName)
@@ -249,7 +296,9 @@ def startIssuance(agent, config: W3CConfig, issuerName: str, sourceCredentialSai
     return record
 
 
-def submitIssuanceVcJwt(agent, config: W3CConfig, issuerName: str, issuanceId: str, body: dict[str, Any]):
+def submitIssuanceVcJwt(
+    agent, config: W3CConfig, issuerName: str, issuanceId: str, body: dict[str, Any]
+):
     """Validate and store an issuer edge-built VC-JWT."""
     requireEnabled(config)
     record = requireIssuance(agent, issuanceId)
@@ -270,7 +319,9 @@ def submitIssuanceVcJwt(agent, config: W3CConfig, issuerName: str, issuanceId: s
 def grantPayloadFromIssuance(record: W3CIssuanceRecord) -> dict[str, str]:
     """Return the issuer-signed EXN payload for delivering one finalized VC-JWT."""
     if not record.vcJwt:
-        raise falcon.HTTPBadRequest(description="W3C issuance has no finalized VC-JWT to grant")
+        raise falcon.HTTPBadRequest(
+            description="W3C issuance has no finalized VC-JWT to grant"
+        )
     return {
         "holderAid": record.holderAid,
         "holderDid": canonicalize_did_webs(record.holderDid),
@@ -285,7 +336,9 @@ def grantPayloadFromIssuance(record: W3CIssuanceRecord) -> dict[str, str]:
     }
 
 
-def submitIssuanceGrant(agent, config: W3CConfig, issuerName: str, issuanceId: str, body: dict[str, Any]):
+def submitIssuanceGrant(
+    agent, config: W3CConfig, issuerName: str, issuanceId: str, body: dict[str, Any]
+):
     """Accept a locally edge-signed issuer grant EXN and queue it for holder delivery."""
     requireEnabled(config)
     hab = requireHab(agent, issuerName)
@@ -293,22 +346,28 @@ def submitIssuanceGrant(agent, config: W3CConfig, issuerName: str, issuanceId: s
     if record.issuerName != issuerName or record.issuerAid != hab.pre:
         raise falcon.HTTPNotFound(description=f"W3C issuance {issuanceId} not found")
     if record.vcJwt is None:
-        raise falcon.HTTPBadRequest(description="W3C issuance has no finalized VC-JWT to grant")
+        raise falcon.HTTPBadRequest(
+            description="W3C issuance has no finalized VC-JWT to grant"
+        )
 
     serder, sigers, atc, rec = signedGrantExchangeBody(body)
     validateIssuanceGrantExn(record, serder, rec)
     for recp in rec:
         if recp not in agent.hby.kevers:
-            raise falcon.HTTPBadRequest(description=f"attempt to send W3C grant to unknown AID={recp}")
+            raise falcon.HTTPBadRequest(
+                description=f"attempt to send W3C grant to unknown AID={recp}"
+            )
 
     if record.state == W3C_ISS_GRANT_SENT and record.grantSaid == serder.said:
         return record
 
-    seal = eventing.SealEvent(i=hab.pre, s="{:x}".format(hab.kever.lastEst.s), d=hab.kever.lastEst.d)
+    seal = eventing.SealEvent(
+        i=hab.pre, s="{:x}".format(hab.kever.lastEst.s), d=hab.kever.lastEst.d
+    )
     ims = eventing.messagize(serder=serder, sigers=sigers, seal=seal)
     ims.extend(atc.encode("utf-8"))
     agent.hby.psr.parseOne(ims=bytearray(ims), exc=agent.exc)
-    queueIssuanceGrantDelivery(agent, hab, serder, ims[serder.size:], rec)
+    queueIssuanceGrantDelivery(agent, hab, serder, ims[serder.size :], rec)
 
     record.grantSaid = serder.said
     record.state = W3C_ISS_GRANT_SENT
@@ -318,7 +377,9 @@ def submitIssuanceGrant(agent, config: W3CConfig, issuerName: str, issuanceId: s
     return record
 
 
-def queueIssuanceGrantDelivery(agent, hab, serder, grant_atc: bytes | bytearray, rec: list[str]):
+def queueIssuanceGrantDelivery(
+    agent, hab, serder, grant_atc: bytes | bytearray, rec: list[str]
+):
     """Send issuer KEL context and the signed W3C grant EXN to recipients."""
     for recp in rec:
         postman = forwarding.StreamPoster(
@@ -328,11 +389,15 @@ def queueIssuanceGrantDelivery(agent, hab, serder, grant_atc: bytes | bytearray,
             topic="credential",
         )
         try:
-            for context_serder, context_atc in grantDeliveryContextMessages(agent, hab.pre):
+            for context_serder, context_atc in grantDeliveryContextMessages(
+                agent, hab.pre
+            ):
                 postman.send(serder=context_serder, attachment=context_atc)
             postman.send(serder=serder, attachment=grant_atc)
         except kering.ValidationError:
-            logger.info("unable to send W3C grant %s to recipient=%s", serder.said, recp)
+            logger.info(
+                "unable to send W3C grant %s to recipient=%s", serder.said, recp
+            )
             continue
 
         agent.extend([doing.DoDoer(doers=postman.deliver())])
@@ -344,11 +409,11 @@ def grantDeliveryContextMessages(agent, issuer_aid: str):
     if kever is not None:
         for msg in agent.hby.db.cloneDelegation(kever):
             serder = serdering.SerderKERI(raw=msg)
-            yield serder, msg[serder.size:]
+            yield serder, msg[serder.size :]
 
     for msg in agent.hby.db.clonePreIter(pre=issuer_aid):
         serder = serdering.SerderKERI(raw=msg)
-        yield serder, msg[serder.size:]
+        yield serder, msg[serder.size :]
 
 
 def signedGrantExchangeBody(body: dict[str, Any]):
@@ -366,7 +431,9 @@ def signedGrantExchangeBody(body: dict[str, Any]):
 
 def validateIssuanceGrantExn(record: W3CIssuanceRecord, serder, rec: list[str]):
     if rec != [record.holderAid]:
-        raise falcon.HTTPBadRequest(description="W3C grant recipients must contain only the issuance holder AID")
+        raise falcon.HTTPBadRequest(
+            description="W3C grant recipients must contain only the issuance holder AID"
+        )
     payload = validateGrantExnShape(serder)
     expected = grantPayloadFromIssuance(record)
     for field, expected_value in expected.items():
@@ -374,25 +441,39 @@ def validateIssuanceGrantExn(record: W3CIssuanceRecord, serder, rec: list[str]):
         if field in {"issuerDid", "holderDid"} and isinstance(actual, str):
             actual = canonicalize_did_webs(actual)
         if actual != expected_value:
-            raise falcon.HTTPBadRequest(description=f"W3C grant EXN field {field} does not match issuance")
+            raise falcon.HTTPBadRequest(
+                description=f"W3C grant EXN field {field} does not match issuance"
+            )
 
 
 def validateGrantExnShape(serder) -> dict[str, Any]:
     if serder.ked.get("r") != W3C_GRANT_ROUTE:
-        raise falcon.HTTPBadRequest(description=f"W3C grant EXN route must be {W3C_GRANT_ROUTE}")
+        raise falcon.HTTPBadRequest(
+            description=f"W3C grant EXN route must be {W3C_GRANT_ROUTE}"
+        )
     payload = serder.ked.get("a")
     if not isinstance(payload, dict):
-        raise falcon.HTTPBadRequest(description="W3C grant EXN payload must be an object")
+        raise falcon.HTTPBadRequest(
+            description="W3C grant EXN payload must be an object"
+        )
     holder_aid = requireString(payload, "holderAid")
     issuer_aid = requireString(payload, "issuerAid")
     if serder.pre != issuer_aid:
-        raise falcon.HTTPBadRequest(description="W3C grant EXN sender must match issuerAid")
+        raise falcon.HTTPBadRequest(
+            description="W3C grant EXN sender must match issuerAid"
+        )
     if serder.ked.get("rp") != holder_aid:
-        raise falcon.HTTPBadRequest(description="W3C grant EXN recipient must match holderAid")
+        raise falcon.HTTPBadRequest(
+            description="W3C grant EXN recipient must match holderAid"
+        )
     if payload.get("i") not in {None, holder_aid}:
-        raise falcon.HTTPBadRequest(description="W3C grant EXN payload recipient must match holderAid")
+        raise falcon.HTTPBadRequest(
+            description="W3C grant EXN payload recipient must match holderAid"
+        )
     if "grantSaid" in payload:
-        raise falcon.HTTPBadRequest(description="W3C grantSaid is derived from the EXN SAID")
+        raise falcon.HTTPBadRequest(
+            description="W3C grantSaid is derived from the EXN SAID"
+        )
     for field in (
         "holderDid",
         "issuerDid",
@@ -420,7 +501,10 @@ def reconcileReceivedGrantExns(agent, config: W3CConfig) -> dict[str, int]:
             result = reconcileReceivedGrantExn(agent, config, serder)
         except Exception:
             summary["failed"] += 1
-            logger.exception("failed to reconcile received W3C grant EXN %s", getattr(serder, "said", ""))
+            logger.exception(
+                "failed to reconcile received W3C grant EXN %s",
+                getattr(serder, "said", ""),
+            )
             continue
         summary[result] += 1
 
@@ -432,7 +516,9 @@ def reconcileReceivedGrantExn(agent, config: W3CConfig, serder) -> str:
     holder_name = localNameForAid(agent, payload["holderAid"])
     if holder_name is None:
         return "skipped"
-    existing = heldCredentialByGrant(agent, serder.said) or heldCredentialByLogicalPayload(agent, payload)
+    existing = heldCredentialByGrant(
+        agent, serder.said
+    ) or heldCredentialByLogicalPayload(agent, payload)
     if existing is not None:
         return "resumed"
     materializeHeldCredentialFromGrant(agent, config, holder_name, payload, serder.said)
@@ -451,9 +537,13 @@ def materializeHeldCredentialFromGrant(
     hab = requireHab(agent, holderName)
     holder_did = requirePublishedDws(agent, holderName, hab.pre)
     if payload["holderAid"] != hab.pre:
-        raise falcon.HTTPBadRequest(description="W3C grant holder AID does not match local holder")
+        raise falcon.HTTPBadRequest(
+            description="W3C grant holder AID does not match local holder"
+        )
     if canonicalize_did_webs(payload["holderDid"]) != canonicalize_did_webs(holder_did):
-        raise falcon.HTTPBadRequest(description="W3C grant holder DID does not match local did:webs DID")
+        raise falcon.HTTPBadRequest(
+            description="W3C grant holder DID does not match local did:webs DID"
+        )
 
     decoded_vc = validateVcJwtForGrant(agent, payload)
     existing = heldCredentialByGrant(agent, grant_said) if grant_said else None
@@ -489,7 +579,9 @@ def materializeHeldCredentialFromGrant(
     return held
 
 
-def submitPresentation(agent, config: W3CConfig, holderName: str, body: dict[str, Any]) -> W3CPresentTxRecord:
+def submitPresentation(
+    agent, config: W3CConfig, holderName: str, body: dict[str, Any]
+) -> W3CPresentTxRecord:
     """Validate an edge-built VP-JWT, submit it to the verifier, and record result state."""
     requireEnabled(config)
     hab = requireHab(agent, holderName)
@@ -498,7 +590,9 @@ def submitPresentation(agent, config: W3CConfig, holderName: str, body: dict[str
     contact = createVerifierContact(agent, holderName, body)
     selected = selectPresentationCredential(agent, holderName, body)
     verifier = verifierRequestBindings(body)
-    validateVpJwtForPresentation(agent, holderName, canonicalize_did_webs(holder_did), selected, body, vp_jwt)
+    validateVpJwtForPresentation(
+        agent, holderName, canonicalize_did_webs(holder_did), selected, body, vp_jwt
+    )
 
     now = utcTimestamp()
     response = None
@@ -506,7 +600,9 @@ def submitPresentation(agent, config: W3CConfig, holderName: str, body: dict[str
     state = W3C_PRES_SUBMITTED
     error = None
     if verifier["responseUri"]:
-        response = postVerifierPresentation(verifier["responseUri"], vp_jwt, verifier["aud"], verifier["nonce"])
+        response = postVerifierPresentation(
+            verifier["responseUri"], vp_jwt, verifier["aud"], verifier["nonce"]
+        )
         submission_state = "submitted"
         if isinstance(response, dict) and response.get("verified") is True:
             state = W3C_PRES_VERIFIED
@@ -543,7 +639,9 @@ def submitPresentation(agent, config: W3CConfig, holderName: str, body: dict[str
     return tx
 
 
-def createVerifierContact(agent, holderName: str, descriptor: dict[str, Any]) -> W3CVerifierContactRecord:
+def createVerifierContact(
+    agent, holderName: str, descriptor: dict[str, Any]
+) -> W3CVerifierContactRecord:
     hab = requireHab(agent, holderName)
     origin = verifierOrigin(descriptor)
     for _keys, contact in agent.adb.w3cvcnt.getItemIter():
@@ -571,28 +669,48 @@ def createVerifierContact(agent, holderName: str, descriptor: dict[str, Any]) ->
 
 
 def listIssuances(agent, issuerName: str) -> list[W3CIssuanceRecord]:
-    return [record for _keys, record in agent.adb.w3cissu.getItemIter() if record.issuerName == issuerName]
+    return [
+        record
+        for _keys, record in agent.adb.w3cissu.getItemIter()
+        if record.issuerName == issuerName
+    ]
 
 
 def listHeldCredentials(agent, holderName: str) -> list[W3CHeldCredentialRecord]:
-    return [record for _keys, record in agent.adb.w3cheld.getItemIter() if record.holderName == holderName]
+    return [
+        record
+        for _keys, record in agent.adb.w3cheld.getItemIter()
+        if record.holderName == holderName
+    ]
 
 
 def listVerifierContacts(agent, holderName: str) -> list[W3CVerifierContactRecord]:
-    return [record for _keys, record in agent.adb.w3cvcnt.getItemIter() if record.holderName == holderName]
+    return [
+        record
+        for _keys, record in agent.adb.w3cvcnt.getItemIter()
+        if record.holderName == holderName
+    ]
 
 
 def listPresentations(agent, holderName: str) -> list[W3CPresentTxRecord]:
-    return [record for _keys, record in agent.adb.w3cptx.getItemIter() if record.holderName == holderName]
+    return [
+        record
+        for _keys, record in agent.adb.w3cptx.getItemIter()
+        if record.holderName == holderName
+    ]
 
 
-def validateVcJwtForIssuance(agent, record: W3CIssuanceRecord, vc_jwt: str) -> dict[str, Any]:
+def validateVcJwtForIssuance(
+    agent, record: W3CIssuanceRecord, vc_jwt: str
+) -> dict[str, Any]:
     decoded = decodeJwtOr400(vc_jwt, "VC-JWT")
     source = record.sourceCredential
     if not isinstance(source, dict):
         creder, *_ = cloneCredential(agent, record.sourceCredentialSaid)
         source = copy.deepcopy(creder.sad)
-    expected_status_base = record.statusBaseUrl or statusReferenceBaseUrl(requireStatusBaseUrl(W3CConfig(enabled=True)))
+    expected_status_base = record.statusBaseUrl or statusReferenceBaseUrl(
+        requireStatusBaseUrl(W3CConfig(enabled=True))
+    )
     return validateVcJwt(
         agent=agent,
         token=vc_jwt,
@@ -625,7 +743,9 @@ def validateVcJwtForGrant(agent, payload: dict[str, Any]) -> dict[str, Any]:
         source_credential_said=payload["sourceCredentialSaid"],
         schema_said=payload["schemaSaid"],
         status_url=payload["statusUrl"],
-        status_base_url=statusReferenceBaseFromStatusUrl(payload["statusUrl"], payload["sourceCredentialSaid"]),
+        status_base_url=statusReferenceBaseFromStatusUrl(
+            payload["statusUrl"], payload["sourceCredentialSaid"]
+        ),
         source=source,
     )
 
@@ -653,15 +773,22 @@ def validateVcJwt(
 
     verfer = currentVerfer(agent, issuer_aid)
     expected_kid = canonicalizeVerificationMethod(f"{issuer_did}#{verfer.qb64}")
-    if canonicalizeVerificationMethod(str(decoded.header.get("kid", ""))) != expected_kid:
-        raise falcon.HTTPBadRequest(description="VC-JWT kid does not match issuer did:webs key")
+    if (
+        canonicalizeVerificationMethod(str(decoded.header.get("kid", "")))
+        != expected_kid
+    ):
+        raise falcon.HTTPBadRequest(
+            description="VC-JWT kid does not match issuer did:webs key"
+        )
     if not verfer.verify(decoded.signature, decoded.signing_input):
         raise falcon.HTTPBadRequest(description="VC-JWT signature does not verify")
 
     if decoded.payload.get("iss") != canonicalize_did_webs(issuer_did):
         raise falcon.HTTPBadRequest(description="VC-JWT iss does not match issuer DID")
     if decoded.payload.get("jti") != f"urn:said:{source_credential_said}":
-        raise falcon.HTTPBadRequest(description="VC-JWT jti does not match source credential SAID")
+        raise falcon.HTTPBadRequest(
+            description="VC-JWT jti does not match source credential SAID"
+        )
 
     expected_vc = transpose_acdc_to_w3c_vc(
         source,
@@ -671,23 +798,40 @@ def validateVcJwt(
     comparable_vc = copy.deepcopy(vc)
     comparable_vc.pop("proof", None)
     if comparable_vc != expected_vc:
-        raise falcon.HTTPBadRequest(description="VC-JWT embedded VC does not match source ACDC projection")
+        raise falcon.HTTPBadRequest(
+            description="VC-JWT embedded VC does not match source ACDC projection"
+        )
     subject = vc.get("credentialSubject", {})
     if not isinstance(subject, dict):
-        raise falcon.HTTPBadRequest(description="VC-JWT credentialSubject must be an object")
+        raise falcon.HTTPBadRequest(
+            description="VC-JWT credentialSubject must be an object"
+        )
     if subject.get("id") != canonicalize_did_webs(holder_did):
-        raise falcon.HTTPBadRequest(description="VC-JWT subject DID does not match holder")
+        raise falcon.HTTPBadRequest(
+            description="VC-JWT subject DID does not match holder"
+        )
     if subject.get("AID") != holder_aid:
-        raise falcon.HTTPBadRequest(description="VC-JWT subject AID does not match holder")
+        raise falcon.HTTPBadRequest(
+            description="VC-JWT subject AID does not match holder"
+        )
     isomer = vc.get("isomer", {})
-    if not isinstance(isomer, dict) or isomer.get("sourceCredentialSaid") != source_credential_said:
-        raise falcon.HTTPBadRequest(description="VC-JWT source credential SAID binding is invalid")
+    if (
+        not isinstance(isomer, dict)
+        or isomer.get("sourceCredentialSaid") != source_credential_said
+    ):
+        raise falcon.HTTPBadRequest(
+            description="VC-JWT source credential SAID binding is invalid"
+        )
     if isomer.get("sourceSchemaSaid") != schema_said or schema_said != source.get("s"):
         raise falcon.HTTPBadRequest(description="VC-JWT schema binding is invalid")
     if vc.get("credentialStatus", {}).get("id") != status_url:
-        raise falcon.HTTPBadRequest(description="VC-JWT status URL does not match KERIA state")
+        raise falcon.HTTPBadRequest(
+            description="VC-JWT status URL does not match KERIA state"
+        )
     if not verify_proof(vc, didMethodForVerfer(expected_kid, verfer)):
-        raise falcon.HTTPBadRequest(description="VC-JWT embedded Data Integrity proof does not verify")
+        raise falcon.HTTPBadRequest(
+            description="VC-JWT embedded Data Integrity proof does not verify"
+        )
     return vc
 
 
@@ -705,8 +849,13 @@ def validateVpJwtForPresentation(
     hab = requireHab(agent, holderName)
     verfer = currentVerfer(agent, hab.pre)
     expected_kid = canonicalizeVerificationMethod(f"{holder_did}#{verfer.qb64}")
-    if canonicalizeVerificationMethod(str(decoded.header.get("kid", ""))) != expected_kid:
-        raise falcon.HTTPBadRequest(description="VP-JWT kid does not match holder did:webs key")
+    if (
+        canonicalizeVerificationMethod(str(decoded.header.get("kid", "")))
+        != expected_kid
+    ):
+        raise falcon.HTTPBadRequest(
+            description="VP-JWT kid does not match holder did:webs key"
+        )
     if not verfer.verify(decoded.signature, decoded.signing_input):
         raise falcon.HTTPBadRequest(description="VP-JWT signature does not verify")
 
@@ -717,31 +866,49 @@ def validateVpJwtForPresentation(
         raise falcon.HTTPBadRequest(description="VP-JWT holder binding is invalid")
     bindings = verifierRequestBindings(descriptor)
     if bindings["aud"] and decoded.payload.get("aud") != bindings["aud"]:
-        raise falcon.HTTPBadRequest(description="VP-JWT aud does not match verifier request")
+        raise falcon.HTTPBadRequest(
+            description="VP-JWT aud does not match verifier request"
+        )
     if bindings["nonce"] and decoded.payload.get("nonce") != bindings["nonce"]:
-        raise falcon.HTTPBadRequest(description="VP-JWT nonce does not match verifier request")
+        raise falcon.HTTPBadRequest(
+            description="VP-JWT nonce does not match verifier request"
+        )
     credentials = vp.get("verifiableCredential")
     if not isinstance(credentials, list) or credentials != [selected.vcJwt]:
-        raise falcon.HTTPBadRequest(description="VP-JWT embedded VC-JWT does not match selected held credential")
-    descriptor_said = descriptor.get("credentialSaid") or descriptor.get("sourceCredentialSaid")
+        raise falcon.HTTPBadRequest(
+            description="VP-JWT embedded VC-JWT does not match selected held credential"
+        )
+    descriptor_said = descriptor.get("credentialSaid") or descriptor.get(
+        "sourceCredentialSaid"
+    )
     if descriptor_said and descriptor_said != selected.sourceCredentialSaid:
-        raise falcon.HTTPBadRequest(description="VP-JWT selected credential does not match requested source credential")
+        raise falcon.HTTPBadRequest(
+            description="VP-JWT selected credential does not match requested source credential"
+        )
     validateHeldCredentialFresh(agent, selected)
 
 
-def selectPresentationCredential(agent, holderName: str, descriptor: dict[str, Any]) -> W3CHeldCredentialRecord:
+def selectPresentationCredential(
+    agent, holderName: str, descriptor: dict[str, Any]
+) -> W3CHeldCredentialRecord:
     credential_id = descriptor.get("credentialId")
     if isinstance(credential_id, str) and credential_id:
         return requireHeldCredential(agent, holderName, credential_id)
 
-    source_said = descriptor.get("credentialSaid") or descriptor.get("sourceCredentialSaid")
+    source_said = descriptor.get("credentialSaid") or descriptor.get(
+        "sourceCredentialSaid"
+    )
     candidates = [
         record
-        for record in uniquePresentationEligibleCredentials(listHeldCredentials(agent, holderName))
+        for record in uniquePresentationEligibleCredentials(
+            listHeldCredentials(agent, holderName)
+        )
         if not source_said or record.sourceCredentialSaid == source_said
     ]
     if len(candidates) != 1:
-        raise falcon.HTTPBadRequest(description="presentation requires exactly one eligible held credential")
+        raise falcon.HTTPBadRequest(
+            description="presentation requires exactly one eligible held credential"
+        )
     return candidates[0]
 
 
@@ -764,7 +931,9 @@ def currentVerfer(agent, aid: str):
 def didMethodForVerfer(method_id: str, verfer) -> dict[str, Any]:
     return {
         "id": method_id,
-        "publicKeyMultibase": encode_multibase_base58btc(ED25519_MULTIKEY_PREFIX + verfer.raw),
+        "publicKeyMultibase": encode_multibase_base58btc(
+            ED25519_MULTIKEY_PREFIX + verfer.raw
+        ),
     }
 
 
@@ -790,7 +959,9 @@ def requireHab(agent, name: str):
 def requirePublishedDws(agent, name: str, aid: str) -> str:
     did = didwebing.publishedDws(agent, aid)
     if did is None:
-        raise falcon.HTTPBadRequest(description=f"identifier {name} has no ready did:webs DID")
+        raise falcon.HTTPBadRequest(
+            description=f"identifier {name} has no ready did:webs DID"
+        )
     return canonicalize_did_webs(did)
 
 
@@ -811,7 +982,9 @@ def statusResourceUrl(base_url: str, credential_said: str) -> str:
 def statusReferenceBaseFromStatusUrl(status_url: str, credential_said: str) -> str:
     suffix = f"/status/{credential_said}"
     if not status_url.endswith(suffix):
-        raise falcon.HTTPBadRequest(description="W3C credential status URL is not bound to source credential SAID")
+        raise falcon.HTTPBadRequest(
+            description="W3C credential status URL is not bound to source credential SAID"
+        )
     return status_url[: -len(suffix)]
 
 
@@ -843,24 +1016,34 @@ def projectCredentialStatus(agent, record: W3CStatusProjectionRecord) -> dict[st
     try:
         creder, *_ = cloneCredential(agent, record.credentialSaid)
     except falcon.HTTPError as exc:
-        raise W3CError(f"credential {record.credentialSaid} is no longer available") from exc
+        raise W3CError(
+            f"credential {record.credentialSaid} is no longer available"
+        ) from exc
 
     acdc = creder.sad
     registry_said = getattr(creder, "regi", "") or acdc.get("ri")
     if not registry_said:
-        raise W3CError(f"credential {record.credentialSaid} does not reference a registry")
+        raise W3CError(
+            f"credential {record.credentialSaid} does not reference a registry"
+        )
 
     tever = registryTever(agent, registry_said)
     if tever is None:
-        raise W3CError(f"missing TEL registry state for credential {record.credentialSaid}: {registry_said}")
+        raise W3CError(
+            f"missing TEL registry state for credential {record.credentialSaid}: {registry_said}"
+        )
 
     state = tever.vcState(record.credentialSaid)
     if state is None:
-        raise W3CError(f"missing accepted TEL state for credential {record.credentialSaid}")
+        raise W3CError(
+            f"missing accepted TEL state for credential {record.credentialSaid}"
+        )
 
     ilk = telIlk(state)
     if ilk not in ACTIVE_TEL_ILKS | REVOKED_TEL_ILKS:
-        raise W3CError(f"unsupported TEL state {ilk!r} for credential {record.credentialSaid}")
+        raise W3CError(
+            f"unsupported TEL state {ilk!r} for credential {record.credentialSaid}"
+        )
 
     return {
         "id": statusResourceUrl(record.statusBaseUrl, record.credentialSaid),
@@ -882,24 +1065,40 @@ def projectCredentialStatus(agent, record: W3CStatusProjectionRecord) -> dict[st
 
 def validateIssuanceSource(agent, issuer_aid: str, creder):
     if creder.issuer != issuer_aid:
-        raise falcon.HTTPBadRequest(description="W3C issuance requires the selected identifier to be the source issuer")
+        raise falcon.HTTPBadRequest(
+            description="W3C issuance requires the selected identifier to be the source issuer"
+        )
     if creder.schema != VRD_SCHEMA:
-        raise falcon.HTTPBadRequest(description=f"unsupported W3C issuance schema SAID {creder.schema}")
+        raise falcon.HTTPBadRequest(
+            description=f"unsupported W3C issuance schema SAID {creder.schema}"
+        )
     state = credentialTelState(agent, creder)
     ilk = telIlk(state) if state is not None else None
     if ilk not in ACTIVE_TEL_ILKS:
-        raise falcon.HTTPBadRequest(description=f"credential {creder.said} is not active")
+        raise falcon.HTTPBadRequest(
+            description=f"credential {creder.said} is not active"
+        )
 
 
 def validateHolderDidChain(acdc: dict[str, Any], holder_aid: str, holder_did: str):
     if not holder_aid:
-        raise falcon.HTTPBadRequest(description="source VRD credential is missing holder AID")
+        raise falcon.HTTPBadRequest(
+            description="source VRD credential is missing holder AID"
+        )
     if not holder_did:
-        raise falcon.HTTPBadRequest(description="source VRD credential is missing holder did:webs DID")
+        raise falcon.HTTPBadRequest(
+            description="source VRD credential is missing holder did:webs DID"
+        )
     if not str(holder_did).startswith("did:webs:"):
-        raise falcon.HTTPBadRequest(description="source VRD holder DID must be did:webs")
+        raise falcon.HTTPBadRequest(
+            description="source VRD holder DID must be did:webs"
+        )
     subject = acdc.get("a", {}) if isinstance(acdc, dict) else {}
-    if isinstance(subject, dict) and subject.get("i") and subject.get("i") != holder_aid:
+    if (
+        isinstance(subject, dict)
+        and subject.get("i")
+        and subject.get("i") != holder_aid
+    ):
         raise falcon.HTTPBadRequest(description="source VRD holder AID is incoherent")
 
 
@@ -969,7 +1168,9 @@ def holderDidFromAcdc(acdc: dict[str, Any]) -> str:
     return subject.get("DID", "") if isinstance(subject, dict) else ""
 
 
-def heldCredentialByGrant(agent, grant_said: str | None) -> W3CHeldCredentialRecord | None:
+def heldCredentialByGrant(
+    agent, grant_said: str | None
+) -> W3CHeldCredentialRecord | None:
     if grant_said is None:
         return None
     for _keys, record in agent.adb.w3cheld.getItemIter():
@@ -978,7 +1179,9 @@ def heldCredentialByGrant(agent, grant_said: str | None) -> W3CHeldCredentialRec
     return None
 
 
-def heldCredentialByLogicalPayload(agent, payload: dict[str, Any]) -> W3CHeldCredentialRecord | None:
+def heldCredentialByLogicalPayload(
+    agent, payload: dict[str, Any]
+) -> W3CHeldCredentialRecord | None:
     for _keys, record in agent.adb.w3cheld.getItemIter():
         if (
             record.holderAid == payload["holderAid"]
@@ -991,12 +1194,20 @@ def heldCredentialByLogicalPayload(agent, payload: dict[str, Any]) -> W3CHeldCre
     return None
 
 
-def uniquePresentationEligibleCredentials(records: list[W3CHeldCredentialRecord]) -> list[W3CHeldCredentialRecord]:
+def uniquePresentationEligibleCredentials(
+    records: list[W3CHeldCredentialRecord],
+) -> list[W3CHeldCredentialRecord]:
     selected: dict[tuple[str, str, str, str, str], W3CHeldCredentialRecord] = {}
     for record in records:
         if record.state != W3C_HELD_ADMITTED:
             continue
-        key = (record.holderAid, record.issuerAid, record.sourceCredentialSaid, record.schemaSaid, record.vcJwt)
+        key = (
+            record.holderAid,
+            record.issuerAid,
+            record.sourceCredentialSaid,
+            record.schemaSaid,
+            record.vcJwt,
+        )
         current = selected.get(key)
         if current is None or (record.updated, record.d) > (current.updated, current.d):
             selected[key] = record
@@ -1004,18 +1215,29 @@ def uniquePresentationEligibleCredentials(records: list[W3CHeldCredentialRecord]
 
 
 def verifierOrigin(descriptor: dict[str, Any]) -> str:
-    for key in ("verifierOrigin", "origin", "response_uri", "submissionEndpoint", "client_id", "aud"):
+    for key in (
+        "verifierOrigin",
+        "origin",
+        "response_uri",
+        "submissionEndpoint",
+        "client_id",
+        "aud",
+    ):
         value = descriptor.get(key)
         if isinstance(value, str) and value:
             return value
-    raise falcon.HTTPBadRequest(description="verifier request descriptor is missing verifier origin")
+    raise falcon.HTTPBadRequest(
+        description="verifier request descriptor is missing verifier origin"
+    )
 
 
 def verifierRequestBindings(descriptor: dict[str, Any]) -> dict[str, str | None]:
     return {
-        "aud": stringValue(descriptor.get("aud")) or stringValue(descriptor.get("client_id")),
+        "aud": stringValue(descriptor.get("aud"))
+        or stringValue(descriptor.get("client_id")),
         "nonce": stringValue(descriptor.get("nonce")),
-        "responseUri": stringValue(descriptor.get("response_uri")) or stringValue(descriptor.get("submissionEndpoint")),
+        "responseUri": stringValue(descriptor.get("response_uri"))
+        or stringValue(descriptor.get("submissionEndpoint")),
     }
 
 
@@ -1027,7 +1249,9 @@ def descriptorFormats(descriptor: dict[str, Any]) -> list[str]:
     return [str(value)] if value else []
 
 
-def postVerifierPresentation(endpoint: str, vp_jwt: str, audience: str | None, nonce: str | None) -> dict[str, Any] | str:
+def postVerifierPresentation(
+    endpoint: str, vp_jwt: str, audience: str | None, nonce: str | None
+) -> dict[str, Any] | str:
     body = {"token": vp_jwt}
     if audience:
         body["audience"] = audience
@@ -1120,24 +1344,36 @@ def requireIssuance(agent, issuanceId: str) -> W3CIssuanceRecord:
     return record
 
 
-def requireHeldCredential(agent, holderName: str, credentialId: str) -> W3CHeldCredentialRecord:
+def requireHeldCredential(
+    agent, holderName: str, credentialId: str
+) -> W3CHeldCredentialRecord:
     record = agent.adb.w3cheld.get(keys=(credentialId,))
     if record is None or record.holderName != holderName:
-        raise falcon.HTTPNotFound(description=f"W3C credential {credentialId} not found")
+        raise falcon.HTTPNotFound(
+            description=f"W3C credential {credentialId} not found"
+        )
     return record
 
 
-def requireVerifierContact(agent, holderName: str, contactId: str) -> W3CVerifierContactRecord:
+def requireVerifierContact(
+    agent, holderName: str, contactId: str
+) -> W3CVerifierContactRecord:
     record = agent.adb.w3cvcnt.get(keys=(contactId,))
     if record is None or record.holderName != holderName:
-        raise falcon.HTTPNotFound(description=f"W3C verifier contact {contactId} not found")
+        raise falcon.HTTPNotFound(
+            description=f"W3C verifier contact {contactId} not found"
+        )
     return record
 
 
-def requirePresentation(agent, holderName: str, presentationId: str) -> W3CPresentTxRecord:
+def requirePresentation(
+    agent, holderName: str, presentationId: str
+) -> W3CPresentTxRecord:
     record = agent.adb.w3cptx.get(keys=(presentationId,))
     if record is None or record.holderName != holderName:
-        raise falcon.HTTPNotFound(description=f"W3C presentation {presentationId} not found")
+        raise falcon.HTTPNotFound(
+            description=f"W3C presentation {presentationId} not found"
+        )
     return record
 
 
@@ -1165,7 +1401,9 @@ def issuanceResponse(record: W3CIssuanceRecord) -> dict[str, Any]:
     }
 
 
-def heldCredentialResponse(record: W3CHeldCredentialRecord, *, detail=False) -> dict[str, Any]:
+def heldCredentialResponse(
+    record: W3CHeldCredentialRecord, *, detail=False
+) -> dict[str, Any]:
     body = {
         "credentialId": record.d,
         "holderName": record.holderName,
@@ -1259,9 +1497,15 @@ class W3CVcGrantHandler:
         payload = validateGrantExnShape(serder)
         holder_name = localNameForAid(self.agent, payload["holderAid"])
         if holder_name is None:
-            logger.info("ignoring W3C grant %s for non-local holder %s", serder.said, payload["holderAid"])
+            logger.info(
+                "ignoring W3C grant %s for non-local holder %s",
+                serder.said,
+                payload["holderAid"],
+            )
             return
-        record = materializeHeldCredentialFromGrant(self.agent, self.config, holder_name, payload, serder.said)
+        record = materializeHeldCredentialFromGrant(
+            self.agent, self.config, holder_name, payload, serder.said
+        )
         notifier = getattr(self.agent, "notifier", None)
         if notifier is not None:
             notifier.add(
@@ -1282,7 +1526,10 @@ class W3CIssuanceCollectionEnd:
         self.config = config
 
     def on_get(self, req, rep, name):
-        records = [issuanceResponse(record) for record in listIssuances(req.context.agent, name)]
+        records = [
+            issuanceResponse(record)
+            for record in listIssuances(req.context.agent, name)
+        ]
         jsonResponse(rep, falcon.HTTP_200, {"issuances": records})
 
     def on_post(self, req, rep, name):
@@ -1298,7 +1545,9 @@ class W3CIssuanceResourceEnd:
     def on_get(self, req, rep, name, issuanceId):
         record = requireIssuance(req.context.agent, issuanceId)
         if record.issuerName != name:
-            raise falcon.HTTPNotFound(description=f"W3C issuance {issuanceId} not found")
+            raise falcon.HTTPNotFound(
+                description=f"W3C issuance {issuanceId} not found"
+            )
         jsonResponse(rep, falcon.HTTP_200, issuanceResponse(record))
 
 
@@ -1307,7 +1556,9 @@ class W3CIssuanceVcJwtEnd:
         self.config = config
 
     def on_post(self, req, rep, name, issuanceId):
-        record = submitIssuanceVcJwt(req.context.agent, self.config, name, issuanceId, mediaBody(req))
+        record = submitIssuanceVcJwt(
+            req.context.agent, self.config, name, issuanceId, mediaBody(req)
+        )
         jsonResponse(rep, falcon.HTTP_202, issuanceResponse(record))
 
 
@@ -1316,7 +1567,9 @@ class W3CIssuanceGrantEnd:
         self.config = config
 
     def on_post(self, req, rep, name, issuanceId):
-        record = submitIssuanceGrant(req.context.agent, self.config, name, issuanceId, mediaBody(req))
+        record = submitIssuanceGrant(
+            req.context.agent, self.config, name, issuanceId, mediaBody(req)
+        )
         jsonResponse(rep, falcon.HTTP_202, issuanceResponse(record))
 
 
@@ -1325,7 +1578,10 @@ class W3CHeldCredentialCollectionEnd:
         self.config = config
 
     def on_get(self, req, rep, name):
-        records = [heldCredentialResponse(record) for record in listHeldCredentials(req.context.agent, name)]
+        records = [
+            heldCredentialResponse(record)
+            for record in listHeldCredentials(req.context.agent, name)
+        ]
         jsonResponse(rep, falcon.HTTP_200, {"credentials": records})
 
 
@@ -1343,7 +1599,10 @@ class W3CVerifierContactCollectionEnd:
         self.config = config
 
     def on_get(self, req, rep, name):
-        contacts = [verifierContactResponse(record) for record in listVerifierContacts(req.context.agent, name)]
+        contacts = [
+            verifierContactResponse(record)
+            for record in listVerifierContacts(req.context.agent, name)
+        ]
         jsonResponse(rep, falcon.HTTP_200, {"contacts": contacts})
 
     def on_post(self, req, rep, name):
@@ -1365,7 +1624,10 @@ class W3CPresentationCollectionEnd:
         self.config = config
 
     def on_get(self, req, rep, name):
-        txs = [presentationResponse(record) for record in listPresentations(req.context.agent, name)]
+        txs = [
+            presentationResponse(record)
+            for record in listPresentations(req.context.agent, name)
+        ]
         jsonResponse(rep, falcon.HTTP_200, {"presentations": txs})
 
     def on_post(self, req, rep, name):
@@ -1391,10 +1653,14 @@ class W3CStatusResourceEnd:
     def on_get(self, req, rep, credSaid):
         record = self.agency.adb.w3cstat.get(keys=(credSaid,))
         if record is None:
-            raise falcon.HTTPNotFound(description=f"W3C credential status {credSaid} not found")
+            raise falcon.HTTPNotFound(
+                description=f"W3C credential status {credSaid} not found"
+            )
         agent = self.agency.lookup(record.aid)
         if agent is None:
-            raise falcon.HTTPConflict(description=f"W3C credential status owner {record.aid} is not available")
+            raise falcon.HTTPConflict(
+                description=f"W3C credential status owner {record.aid} is not available"
+            )
         try:
             body = projectCredentialStatus(agent, record)
         except W3CError as exc:

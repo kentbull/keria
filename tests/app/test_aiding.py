@@ -106,7 +106,9 @@ def test_endrole_ends(helpers):
         aid = op["response"]
         recp = aid["i"]
         assert recp == "EHgwVwQT15OJvilVvW57HE4w0-GPs_Stj2OFoAHZSysY"
-        advance_managed_aid_with_interaction(agent, helpers, "user1", recp, salt, aid["d"])
+        advance_managed_aid_with_interaction(
+            agent, helpers, "user1", recp, salt, aid["d"]
+        )
 
         rpy = helpers.endrole(recp, agent.agentHab.pre)
         sigs = helpers.sign(salt, 0, 0, rpy.raw)
@@ -222,9 +224,9 @@ def test_identifier_dws_resource_returns_did_payload_when_ready(helpers, monkeyp
         monkeypatch.setattr(
             didwebing,
             "matchingDesignatedAliases",
-            lambda _hby, _rgy, candidate_aid, candidate: [candidate]
-            if candidate_aid == aid and candidate == did
-            else [],
+            lambda _hby, _rgy, candidate_aid, candidate: (
+                [candidate] if candidate_aid == aid and candidate == did else []
+            ),
         )
 
         ready = client.simulate_get(path="/identifiers/aid1/dws")
@@ -248,7 +250,9 @@ def test_locscheme_ends(helpers, mockHelpingNowUTC):
         aid = op["response"]
         recp = aid["i"]
         assert recp == "EHgwVwQT15OJvilVvW57HE4w0-GPs_Stj2OFoAHZSysY"
-        advance_managed_aid_with_interaction(agent, helpers, "user1", recp, salt, aid["d"])
+        advance_managed_aid_with_interaction(
+            agent, helpers, "user1", recp, salt, aid["d"]
+        )
 
         rpy = helpers.locscheme(recp, "http://testurl.com")
         sigs = [

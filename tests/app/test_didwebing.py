@@ -218,9 +218,9 @@ def test_setup_descriptor_reports_ready(helpers, monkeypatch):
         monkeypatch.setattr(
             didwebing,
             "matchingDesignatedAliases",
-            lambda _hby, _rgy, candidate_aid, candidate: [candidate]
-            if candidate_aid == aid and candidate == did
-            else [],
+            lambda _hby, _rgy, candidate_aid, candidate: (
+                [candidate] if candidate_aid == aid and candidate == did else []
+            ),
         )
 
         result = client.simulate_get("/identifiers/aid1/dws/setup")
@@ -246,7 +246,9 @@ def test_old_signing_request_endpoints_are_gone(helpers):
     with helpers.openKeria() as (agency, _agent, app, client):
         aiding.loadEnds(app=app, agency=agency, authn=None)
 
-        assert client.simulate_get("/didwebs/signing/requests").status == falcon.HTTP_404
+        assert (
+            client.simulate_get("/didwebs/signing/requests").status == falcon.HTTP_404
+        )
         assert client.simulate_get("/didwebs/signing/requests/bad").status == (
             falcon.HTTP_404
         )
@@ -316,9 +318,9 @@ def test_asset_routes_return_generated_material_when_available(helpers, monkeypa
         monkeypatch.setattr(
             didwebing,
             "matchingDesignatedAliases",
-            lambda _hby, _rgy, candidate_aid, candidate: [candidate]
-            if candidate_aid == aid and candidate == did
-            else [],
+            lambda _hby, _rgy, candidate_aid, candidate: (
+                [candidate] if candidate_aid == aid and candidate == did else []
+            ),
         )
         monkeypatch.setattr(
             didwebing,

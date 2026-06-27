@@ -257,9 +257,7 @@ def setupInfo(agent, config: DidWebsConfig, name: str, aid: str) -> dict:
 
     registry = agent.rgy.registryByName(regname)
     registry_id = registry.regk if registry is not None else None
-    registry_ready = (
-        registry is not None and registryComplete(agent, registry)
-    )
+    registry_ready = registry is not None and registryComplete(agent, registry)
     credential = (
         findDesignatedAliasCredential(agent, config, aid, registry)
         if registry is not None

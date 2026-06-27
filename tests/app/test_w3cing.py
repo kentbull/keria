@@ -32,7 +32,9 @@ class SigningHab:
     def __init__(self, aid, signer, name=None):
         self.name = name or aid
         self.pre = aid
-        self.kever = SimpleNamespace(verfers=[signer.verfer], lastEst=SimpleNamespace(s=0, d=aid))
+        self.kever = SimpleNamespace(
+            verfers=[signer.verfer], lastEst=SimpleNamespace(s=0, d=aid)
+        )
         self._signer = signer
 
     def sign(self, ser, **kwa):
@@ -54,7 +56,9 @@ class ReadThroughTevers(dict):
         return default
 
 
-def valid_acdc(*, issuer="Eissuer", holder="Eholder", holder_did="did:webs:example.com:dws:Eholder"):
+def valid_acdc(
+    *, issuer="Eissuer", holder="Eholder", holder_did="did:webs:example.com:dws:Eholder"
+):
     return {
         "d": "credential-said",
         "i": issuer,
@@ -215,17 +219,31 @@ def test_load_admin_ends_registers_edge_owned_w3c_routes(helpers):
     with helpers.openKeria() as (_agency, _agent, app, client):
         w3cing.loadAdminEnds(app, w3c_config())
 
-        assert client.simulate_get("/identifiers/qvi/w3c/issuances").json == {"issuances": []}
-        assert client.simulate_get("/identifiers/le/w3c/credentials").json == {"credentials": []}
-        assert client.simulate_get("/identifiers/le/w3c/verifier-contacts").json == {"contacts": []}
+        assert client.simulate_get("/identifiers/qvi/w3c/issuances").json == {
+            "issuances": []
+        }
+        assert client.simulate_get("/identifiers/le/w3c/credentials").json == {
+            "credentials": []
+        }
+        assert client.simulate_get("/identifiers/le/w3c/verifier-contacts").json == {
+            "contacts": []
+        }
         assert client.simulate_get("/identifiers/le/w3c/presentations").json == {
             "presentations": [],
         }
-        assert client.simulate_get("/identifiers/le/w3c/signing-requests").status == "404 Not Found"
-        assert client.simulate_get("/identifiers/le/w3c/present-txs").status == "404 Not Found"
+        assert (
+            client.simulate_get("/identifiers/le/w3c/signing-requests").status
+            == "404 Not Found"
+        )
+        assert (
+            client.simulate_get("/identifiers/le/w3c/present-txs").status
+            == "404 Not Found"
+        )
 
 
-def test_start_issuance_creates_edge_artifact_context_without_signing_request(helpers, monkeypatch):
+def test_start_issuance_creates_edge_artifact_context_without_signing_request(
+    helpers, monkeypatch
+):
     issuer_aid = "E" + ("Q" * 43)
     holder_aid = "E" + ("H" * 43)
     holder_did = f"did:webs:example.com:dws:{holder_aid}"
@@ -236,7 +254,11 @@ def test_start_issuance_creates_edge_artifact_context_without_signing_request(he
 
     with helpers.openKeria() as (_agency, agent, _app, _client):
         monkeypatch.setattr(agent.hby, "habByName", lambda name: issuer_hab)
-        monkeypatch.setattr(w3cing.didwebing, "publishedDws", lambda _agent, aid: f"did:webs:example.com:dws:{aid}")
+        monkeypatch.setattr(
+            w3cing.didwebing,
+            "publishedDws",
+            lambda _agent, aid: f"did:webs:example.com:dws:{aid}",
+        )
         monkeypatch.setattr(w3cing, "cloneCredential", lambda _agent, _said: (creder,))
         monkeypatch.setattr(w3cing, "validateIssuanceSource", lambda *_args: None)
 
@@ -250,7 +272,9 @@ def test_start_issuance_creates_edge_artifact_context_without_signing_request(he
         assert not hasattr(record, "signingRequestId")
 
 
-def test_submit_edge_built_vc_jwt_validates_and_stores_delivery_ready(helpers, monkeypatch):
+def test_submit_edge_built_vc_jwt_validates_and_stores_delivery_ready(
+    helpers, monkeypatch
+):
     issuer_aid = "E" + ("Q" * 43)
     holder_aid = "E" + ("H" * 43)
     issuer_did = f"did:webs:example.com:dws:{issuer_aid}"
@@ -262,13 +286,19 @@ def test_submit_edge_built_vc_jwt_validates_and_stores_delivery_ready(helpers, m
     with helpers.openKeria() as (_agency, agent, _app, _client):
         agent.hby.kevers[issuer_aid] = issuer_hab.kever
         monkeypatch.setattr(agent.hby, "habByName", lambda name: issuer_hab)
-        monkeypatch.setattr(w3cing.didwebing, "publishedDws", lambda _agent, aid: issuer_did)
+        monkeypatch.setattr(
+            w3cing.didwebing, "publishedDws", lambda _agent, aid: issuer_did
+        )
         monkeypatch.setattr(w3cing, "cloneCredential", lambda _agent, _said: (creder,))
         monkeypatch.setattr(w3cing, "validateIssuanceSource", lambda *_args: None)
         record = w3cing.startIssuance(agent, w3c_config(), "qvi", "credential-said")
-        vc_jwt, secured_vc = issue_valid_vc_jwt(acdc, issuer_did, record.statusBaseUrl, issuer_hab)
+        vc_jwt, secured_vc = issue_valid_vc_jwt(
+            acdc, issuer_did, record.statusBaseUrl, issuer_hab
+        )
 
-        updated = w3cing.submitIssuanceVcJwt(agent, w3c_config(), "qvi", record.d, {"vcJwt": vc_jwt})
+        updated = w3cing.submitIssuanceVcJwt(
+            agent, w3c_config(), "qvi", record.d, {"vcJwt": vc_jwt}
+        )
 
         assert updated.state == w3cing.W3C_ISS_DELIVERY_PENDING
         assert updated.vcJwt == vc_jwt
@@ -288,19 +318,27 @@ def test_submit_vc_jwt_rejects_wrong_issuer_signature(helpers, monkeypatch):
     with helpers.openKeria() as (_agency, agent, _app, _client):
         agent.hby.kevers[issuer_aid] = issuer_hab.kever
         monkeypatch.setattr(agent.hby, "habByName", lambda name: issuer_hab)
-        monkeypatch.setattr(w3cing.didwebing, "publishedDws", lambda _agent, aid: issuer_did)
+        monkeypatch.setattr(
+            w3cing.didwebing, "publishedDws", lambda _agent, aid: issuer_did
+        )
         monkeypatch.setattr(w3cing, "cloneCredential", lambda _agent, _said: (creder,))
         monkeypatch.setattr(w3cing, "validateIssuanceSource", lambda *_args: None)
         record = w3cing.startIssuance(agent, w3c_config(), "qvi", "credential-said")
-        vc_jwt, _vc = issue_valid_vc_jwt(acdc, issuer_did, record.statusBaseUrl, wrong_hab)
+        vc_jwt, _vc = issue_valid_vc_jwt(
+            acdc, issuer_did, record.statusBaseUrl, wrong_hab
+        )
 
         with pytest.raises(Exception) as excinfo:
-            w3cing.submitIssuanceVcJwt(agent, w3c_config(), "qvi", record.d, {"vcJwt": vc_jwt})
+            w3cing.submitIssuanceVcJwt(
+                agent, w3c_config(), "qvi", record.d, {"vcJwt": vc_jwt}
+            )
 
         assert "kid does not match" in excinfo.value.description
 
 
-def test_w3c_grant_exn_handler_materializes_held_credential_directly(helpers, monkeypatch):
+def test_w3c_grant_exn_handler_materializes_held_credential_directly(
+    helpers, monkeypatch
+):
     issuer_aid = "E" + ("Q" * 43)
     holder_aid = "E" + ("H" * 43)
     issuer_did = f"did:webs:example.com:dws:{issuer_aid}"
@@ -308,15 +346,23 @@ def test_w3c_grant_exn_handler_materializes_held_credential_directly(helpers, mo
     issuer_hab = SigningHab(issuer_aid, edge_signer(), "qvi")
     holder_hab = SigningHab(holder_aid, edge_signer(b"1234567890abcdef"), "le")
     acdc = valid_acdc(issuer=issuer_aid, holder=holder_aid, holder_did=holder_did)
-    vc_jwt, _secured = issue_valid_vc_jwt(acdc, issuer_did, "http://status.example/w3c/vc", issuer_hab)
+    vc_jwt, _secured = issue_valid_vc_jwt(
+        acdc, issuer_did, "http://status.example/w3c/vc", issuer_hab
+    )
 
     with helpers.openKeria() as (_agency, agent, _app, _client):
         agent.hby.habs[holder_aid] = holder_hab
         agent.hby.kevers[issuer_aid] = issuer_hab.kever
         agent.hby.kevers[holder_aid] = holder_hab.kever
-        monkeypatch.setattr(agent.hby, "habByName", lambda name: holder_hab if name == "le" else None)
-        monkeypatch.setattr(w3cing.didwebing, "publishedDws", lambda _agent, aid: holder_did)
-        monkeypatch.setattr(w3cing, "cloneCredential", lambda _agent, _said: (fake_creder(acdc),))
+        monkeypatch.setattr(
+            agent.hby, "habByName", lambda name: holder_hab if name == "le" else None
+        )
+        monkeypatch.setattr(
+            w3cing.didwebing, "publishedDws", lambda _agent, aid: holder_did
+        )
+        monkeypatch.setattr(
+            w3cing, "cloneCredential", lambda _agent, _said: (fake_creder(acdc),)
+        )
         monkeypatch.setattr(w3cing, "validateIssuanceSource", lambda *_args: None)
         exn, _atc = exchanging.exchange(
             route=w3cing.W3C_GRANT_ROUTE,
@@ -348,7 +394,9 @@ def test_w3c_grant_exn_handler_materializes_held_credential_directly(helpers, mo
         assert not hasattr(agent.adb, "w3cimp")
 
 
-def test_presentation_accepts_edge_built_vp_jwt_without_signing_request(helpers, monkeypatch):
+def test_presentation_accepts_edge_built_vp_jwt_without_signing_request(
+    helpers, monkeypatch
+):
     issuer_aid = "E" + ("Q" * 43)
     holder_aid = "E" + ("H" * 43)
     holder_did = f"did:webs:example.com:dws:{holder_aid}"
@@ -385,11 +433,29 @@ def test_presentation_accepts_edge_built_vp_jwt_without_signing_request(helpers,
     with helpers.openKeria() as (_agency, agent, _app, _client):
         agent.hby.habs[holder_aid] = holder_hab
         agent.hby.kevers[holder_aid] = holder_hab.kever
-        monkeypatch.setattr(agent.hby, "habByName", lambda name: holder_hab if name == "le" else None)
-        monkeypatch.setattr(w3cing.didwebing, "publishedDws", lambda _agent, aid: holder_did)
-        monkeypatch.setattr(w3cing, "cloneCredential", lambda _agent, _said: (fake_creder(valid_acdc(issuer=issuer_aid, holder=holder_aid, holder_did=holder_did)),))
+        monkeypatch.setattr(
+            agent.hby, "habByName", lambda name: holder_hab if name == "le" else None
+        )
+        monkeypatch.setattr(
+            w3cing.didwebing, "publishedDws", lambda _agent, aid: holder_did
+        )
+        monkeypatch.setattr(
+            w3cing,
+            "cloneCredential",
+            lambda _agent, _said: (
+                fake_creder(
+                    valid_acdc(
+                        issuer=issuer_aid, holder=holder_aid, holder_did=holder_did
+                    )
+                ),
+            ),
+        )
         monkeypatch.setattr(w3cing, "validateIssuanceSource", lambda *_args: None)
-        monkeypatch.setattr(w3cing, "postVerifierPresentation", lambda endpoint, token, audience, nonce: {"accepted": True})
+        monkeypatch.setattr(
+            w3cing,
+            "postVerifierPresentation",
+            lambda endpoint, token, audience, nonce: {"accepted": True},
+        )
         agent.adb.w3cheld.pin(keys=(held.d,), val=held)
 
         tx = w3cing.submitPresentation(
@@ -450,8 +516,12 @@ def test_presentation_rejects_vp_signed_by_wrong_holder(helpers, monkeypatch):
     with helpers.openKeria() as (_agency, agent, _app, _client):
         agent.hby.habs[holder_aid] = holder_hab
         agent.hby.kevers[holder_aid] = holder_hab.kever
-        monkeypatch.setattr(agent.hby, "habByName", lambda name: holder_hab if name == "le" else None)
-        monkeypatch.setattr(w3cing.didwebing, "publishedDws", lambda _agent, aid: holder_did)
+        monkeypatch.setattr(
+            agent.hby, "habByName", lambda name: holder_hab if name == "le" else None
+        )
+        monkeypatch.setattr(
+            w3cing.didwebing, "publishedDws", lambda _agent, aid: holder_did
+        )
         agent.adb.w3cheld.pin(keys=(held.d,), val=held)
 
         with pytest.raises(Exception) as excinfo:
