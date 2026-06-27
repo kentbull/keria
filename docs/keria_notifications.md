@@ -87,8 +87,6 @@ Here's the breakdown for each of the exn route types:
 - `/delegate/request`: 
   - Handled by `DelegateRequestHandler` - creates a notification for the delegator only.
   - Only one event type, the delegation request.
-- `/oobis`: 
-  - Handled by `OobiRequestHandler`, though is not currently registered. No notification needed for OOBI resolution.
 
 ### Route attribute for exchange message routing
 
