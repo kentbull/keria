@@ -85,6 +85,65 @@ keria.app.aiding
 .. automodule:: keria.app.aiding
     :members:
 
+keria.app.didwebing
+-------------------
+
+``keria.app.didwebing`` uses the generic signaling layer; it does not own SSE
+transport. Its durable contract is did:webs-specific:
+
+- dynamic public ``did.json`` and ``keri.cesr`` asset generation;
+- authenticated readiness projection under ``/identifiers/{name}/dws``; and
+- authenticated setup hints under ``/identifiers/{name}/dws/setup`` for the
+  edge controller to create the designated-alias registry and credential with
+  normal Signify APIs.
+
+KERIA does not create the registry, issue the designated-alias ACDC, or expose a
+did:webs signing queue. It validates the resulting local state before serving
+public did:webs assets.
+
+.. automodule:: keria.app.didwebing
+    :members:
+
+keria.app.w3cing
+----------------
+
+``keria.app.w3cing`` validates edge-owned W3C VC-JWT and VP-JWT artifacts for
+Signify-managed AIDs. KERIA owns durable issuance, held credential, verifier
+contact, presentation, and status projection records. Native KERI, TEL, and
+ACDC state remain the source of truth. Edge clients retain custody of
+managed-AID signing keys and use W3C helper packages to build and sign W3C
+artifacts.
+
+The W3C workflow is configured under ``w3c``. ``w3c.status_base_url`` or
+``KERIA_W3C_STATUS_BASE_URL`` must point at the public KERIA base URL used by
+verifiers. ``KERIA_W3C_ENABLED=true`` enables the authenticated workflow routes
+and the public status resource at ``/w3c/vc/status/{credSaid}``.
+
+Issuer-side clients start W3C issuance with
+``POST /identifiers/{name}/w3c/issuances`` using a native VRD credential SAID.
+KERIA validates the source credential, holder binding, issuer did:webs state,
+TEL state, and status projection config, then returns context for the edge to
+build a VC-JWT. The edge submits the completed VC-JWT to
+``POST /identifiers/{name}/w3c/issuances/{issuanceId}/vc-jwt``.
+
+Issuer-side clients deliver the finalized W3C credential with
+``POST /identifiers/{name}/w3c/issuances/{issuanceId}/grant``. KERIA validates
+the issuer-signed EXN and materializes holder W3C credential state only when the
+matching native credential is available.
+
+Holder-side clients list held W3C credentials under
+``/identifiers/{name}/w3c/credentials`` and create or inspect verifier contacts
+under ``/identifiers/{name}/w3c/verifier-contacts``.
+
+Presentations are submitted with
+``POST /identifiers/{name}/w3c/presentations``. The holder edge chooses one
+held W3C credential, builds the request-bound VP-JWT, and submits it to KERIA.
+KERIA validates holder DID, selected credential, audience, nonce, response URI,
+status, and proof binding before forwarding to the verifier response endpoint.
+
+.. automodule:: keria.app.w3cing
+    :members:
+
 keria.app.credentialing
 -----------------------
 

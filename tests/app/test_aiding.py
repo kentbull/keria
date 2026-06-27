@@ -27,10 +27,26 @@ from keri.vdr import credentialing
 from hio.base import doing
 
 
-from keria.app import aiding, agenting
+from keria.app import aiding, agenting, didwebing
 from keria.app.aiding import IdentifierOOBICollectionEnd, RpyEscrowCollectionEnd
 from keria.core import longrunning
 from keria.testing.testing_helper import SCRIPTS_DIR
+
+
+def advance_managed_aid_with_interaction(agent, helpers, name, aid, salt, dig):
+    """Advance a managed AID past inception without rotating its signing keys."""
+    serder, sigs = helpers.interact(
+        pre=aid,
+        bran=salt,
+        pidx=0,
+        ridx=0,
+        sn="1",
+        dig=dig,
+        data=[{"test": "interaction"}],
+    )
+    hab = agent.hby.habByName(name)
+    hab.interact(serder=serder, sigers=[core.Siger(qb64=sig) for sig in sigs])
+    assert hab.kever.serder.ilk == coring.Ilks.ixn
 
 
 def test_load_ends(helpers):
@@ -47,6 +63,10 @@ def test_load_ends(helpers):
         assert isinstance(end, aiding.IdentifierCollectionEnd)
         (end, *_) = app._router.find("/identifiers/AID")
         assert isinstance(end, aiding.IdentifierResourceEnd)
+        (end, *_) = app._router.find("/identifiers/AID/dws")
+        assert isinstance(end, aiding.IdentifierDwsResourceEnd)
+        (end, *_) = app._router.find("/identifiers/AID/dws/setup")
+        assert isinstance(end, aiding.IdentifierDwsSetupResourceEnd)
         (end, *_) = app._router.find("/identifiers/NAME/oobis")
         assert isinstance(end, aiding.IdentifierOOBICollectionEnd)
         (end, *_) = app._router.find("/identifiers/NAME/endroles")
@@ -86,6 +106,9 @@ def test_endrole_ends(helpers):
         aid = op["response"]
         recp = aid["i"]
         assert recp == "EHgwVwQT15OJvilVvW57HE4w0-GPs_Stj2OFoAHZSysY"
+        advance_managed_aid_with_interaction(
+            agent, helpers, "user1", recp, salt, aid["d"]
+        )
 
         rpy = helpers.endrole(recp, agent.agentHab.pre)
         sigs = helpers.sign(salt, 0, 0, rpy.raw)
@@ -152,6 +175,69 @@ def test_endrole_ends(helpers):
         }
 
 
+def test_agent_resource_excludes_dws(helpers):
+    config = didwebing.DidWebsConfig(
+        enabled=True, domain="127.0.0.1", host="127.0.0.1", port=3902, path="dws"
+    )
+    with helpers.openKeria() as (_agency, agent, app, client):
+        agent.didWebsConfig = config
+        aiding.loadEnds(app=app, agency=_agency, authn=None)
+
+        result = client.simulate_get(path=f"/agent/{agent.caid}")
+        assert result.status_code == 200
+        assert "dws" not in result.json
+
+        result = client.simulate_get(path=f"/identifiers/{agent.agentHab.pre}/dws")
+        assert result.status_code == 200
+        assert result.json == {
+            "dws": None,
+            "didJsonUrl": None,
+            "keriCesrUrl": None,
+        }
+
+
+def test_identifier_dws_resource_returns_did_payload_when_ready(helpers, monkeypatch):
+    config = didwebing.DidWebsConfig(
+        enabled=True, domain="127.0.0.1", host="127.0.0.1", port=3902, path="dws"
+    )
+    salt = b"0123456789abcdef"
+    with helpers.openKeria() as (_agency, agent, app, client):
+        agent.didWebsConfig = config
+        aiding.loadEnds(app=app, agency=_agency, authn=None)
+
+        op = helpers.createAid(client, "aid1", salt)
+        aid = op["response"]["i"]
+
+        pending = client.simulate_get(path="/identifiers/aid1/dws")
+        assert pending.status_code == 200
+        assert pending.json == {
+            "dws": None,
+            "didJsonUrl": None,
+            "keriCesrUrl": None,
+        }
+
+        missing = client.simulate_get(path="/identifiers/missing/dws")
+        assert missing.status_code == 404
+
+        did = didwebing.didForAid(config, aid)
+
+        monkeypatch.setattr(
+            didwebing,
+            "matchingDesignatedAliases",
+            lambda _hby, _rgy, candidate_aid, candidate: (
+                [candidate] if candidate_aid == aid and candidate == did else []
+            ),
+        )
+
+        ready = client.simulate_get(path="/identifiers/aid1/dws")
+        assert ready.status_code == 200
+        assert ready.json == {
+            "dws": did,
+            "didJsonUrl": f"http://127.0.0.1:3902/dws/{aid}/did.json",
+            "keriCesrUrl": f"http://127.0.0.1:3902/dws/{aid}/keri.cesr",
+        }
+
+
 def test_locscheme_ends(helpers, mockHelpingNowUTC):
     with helpers.openKeria() as (agency, agent, app, client):
         locSchemesEnd = aiding.LocSchemeCollectionEnd()
@@ -164,6 +250,9 @@ def test_locscheme_ends(helpers, mockHelpingNowUTC):
         aid = op["response"]
         recp = aid["i"]
         assert recp == "EHgwVwQT15OJvilVvW57HE4w0-GPs_Stj2OFoAHZSysY"
+        advance_managed_aid_with_interaction(
+            agent, helpers, "user1", recp, salt, aid["d"]
+        )
 
         rpy = helpers.locscheme(recp, "http://testurl.com")
         sigs = [
@@ -183,7 +272,7 @@ def test_locscheme_ends(helpers, mockHelpingNowUTC):
         res = client.simulate_post(path="/identifiers/user1/locschemes", json=body)
         assert res.status_code == 400
         assert res.json == {
-            "description": "unable to verify end role reply message",
+            "description": "unable to verify location scheme reply message",
             "title": "400 Bad Request",
         }
 
@@ -355,6 +444,16 @@ def test_agent_resource(helpers, mockHelpingNowUTC):
             },
         }
         assert res.json["pidx"] == 0
+
+        agent_inception = res.json["agent"]
+        agent.agentHab.interact(data=[])
+        latest = asdict(agent.hby.kevers[agent.pre].state())
+        assert latest["et"] == "ixn"
+        assert latest["s"] == "1"
+
+        res = client.simulate_get(path=f"/agent/{agent.caid}")
+        assert res.status_code == 200
+        assert res.json["agent"] == agent_inception
 
         # Test rotation
         body = {}

@@ -7,6 +7,7 @@ services and endpoint for ACDC credential managements
 """
 
 import json
+import urllib.parse
 from dataclasses import asdict, dataclass, field
 
 import falcon
@@ -476,6 +477,7 @@ class RegistryResourceEnd:
            404:
             description: The requested registry was not found.
         """
+        registryName = urllib.parse.unquote(registryName)
         agent = req.context.agent
 
         hab = (
@@ -559,6 +561,7 @@ class RegistryResourceEnd:
            404:
                 description: The requested registry was not found.
         """
+        registryName = urllib.parse.unquote(registryName)
         agent = req.context.agent
 
         hab = (

@@ -28,6 +28,7 @@ Welcome to KERIA's documentation!
    :caption: Contents:
 
    README
+   w3c_holder_workflow
 
 API Reference
 =============

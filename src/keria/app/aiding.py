@@ -24,6 +24,7 @@ from marshmallow_dataclass import class_schema
 
 from ..core import longrunning, httping
 from ..utils.openapi import namedtupleToEnum, dataclassFromFielddom
+from . import didwebing
 from keri.core.serdering import Protocols, Vrsn_1_0, Vrsn_2_0, SerderKERI
 
 logger = ogler.getLogger()
@@ -40,6 +41,11 @@ def loadEnds(app, agency, authn):
     app.add_route("/identifiers/{name}", aidEnd)
     app.add_route("/identifiers/{name}/events", aidEnd)
     app.add_route("/identifiers/{name}/submit", aidEnd)
+
+    aidDwsEnd = IdentifierDwsResourceEnd()
+    app.add_route("/identifiers/{name}/dws", aidDwsEnd)
+    aidDwsSetupEnd = IdentifierDwsSetupResourceEnd()
+    app.add_route("/identifiers/{name}/dws/setup", aidDwsSetupEnd)
 
     aidOOBIsEnd = IdentifierOOBICollectionEnd()
     app.add_route("/identifiers/{name}/oobis", aidOOBIsEnd)
@@ -241,7 +247,7 @@ class AgentResourceEnd:
         eserder = serdering.SerderKERI(raw=bytes(msg))
 
         body = dict(
-            agent=asdict(agent.hby.kevers[agent.pre].state()),
+            agent=agentInceptionState(agent),
             controller=dict(state=state, ee=eserder.ked),
             pidx=pidx,
         )
@@ -439,6 +445,47 @@ class AgentResourceEnd:
         couple = delegatorsn.qb64b + delegator.qb64b
         dgkey = dbing.dgKey(prefixer.qb64b, saider.qb64)
         agent.hby.db.setAes(dgkey, couple)  # authorizer event seal (delegator/issuer)
+
+
+def agentInceptionState(agent):
+    """Return stable delegated inception state for the KERIA agent AID.
+
+    Signify clients use the ``agent`` value returned by ``/agent/{caid}`` as
+    launch metadata for the agent's delegated inception. Agent interactions
+    after boot must not change that response into an ``ixn`` state.
+    """
+    state = asdict(agent.hby.kevers[agent.pre].state())
+    if state["et"] == coring.Ilks.dip:
+        return state
+
+    dig = agent.hby.db.getKeLast(dbing.snKey(agent.pre, 0))
+    if dig is None:
+        return state
+
+    dgkey = dbing.dgKey(agent.pre, bytes(dig))
+    msg = agent.hby.db.getEvt(dgkey)
+    if msg is None:
+        return state
+
+    iserder = serdering.SerderKERI(raw=bytes(msg))
+    if iserder.ilk != coring.Ilks.dip:
+        return state
+
+    sigs = agent.hby.db.getSigs(dgkey)
+    fner = agent.hby.db.fons.get(keys=(iserder.pre, iserder.said))
+    dts = agent.hby.db.getDts(dgkey)
+    if not sigs or fner is None or dts is None:
+        return state
+
+    inception = eventing.Kever(
+        serder=iserder,
+        sigers=[core.Siger(qb64b=bytes(sig)) for sig in sigs],
+        db=agent.hby.db,
+        check=True,
+    )
+    inception.fner = fner
+    inception.dater = coring.Dater(dts=bytes(dts))
+    return asdict(inception.state())
 
 
 @dataclass
@@ -1261,6 +1308,75 @@ class IdentifierResourceEnd:
         )
 
 
+class IdentifierDwsResourceEnd:
+    """Resource class for retrieving one identifier's published did:webs payload."""
+
+    @staticmethod
+    def on_get(req, rep, name):
+        """Identifier did:webs GET endpoint."""
+        if not name:
+            raise falcon.HTTPBadRequest(description="name is required")
+
+        agent = req.context.agent
+        hab = (
+            agent.hby.habs[name]
+            if name in agent.hby.habs
+            else agent.hby.habByName(name)
+        )
+        if hab is None:
+            raise falcon.HTTPNotFound(
+                description=f"{name} is not a valid identifier name or prefix"
+            )
+
+        dws = didwebing.publishedDws(agent, hab.pre)
+        payload = {
+            "dws": dws,
+            "didJsonUrl": None,
+            "keriCesrUrl": None,
+        }
+        if dws is not None:
+            payload.update(didwebing.assetUrls(agent.didWebsConfig, hab.pre))
+
+        rep.status = falcon.HTTP_200
+        rep.content_type = "application/json"
+        rep.data = json.dumps(payload).encode("utf-8")
+
+
+class IdentifierDwsSetupResourceEnd:
+    """Resource class for retrieving did:webs setup state and edge-call args."""
+
+    @staticmethod
+    def on_get(req, rep, name):
+        """Identifier did:webs setup GET endpoint."""
+        if not name:
+            raise falcon.HTTPBadRequest(description="name is required")
+
+        agent = req.context.agent
+        hab = (
+            agent.hby.habs[name]
+            if name in agent.hby.habs
+            else agent.hby.habByName(name)
+        )
+        if hab is None:
+            raise falcon.HTTPNotFound(
+                description=f"{name} is not a valid identifier name or prefix"
+            )
+
+        try:
+            payload = didwebing.setupInfo(
+                agent=agent,
+                config=agent.didWebsConfig,
+                name=hab.name,
+                aid=hab.pre,
+            )
+        except didwebing.ArtifactUnavailable as ex:
+            raise falcon.HTTPNotFound(description=str(ex))
+
+        rep.status = falcon.HTTP_200
+        rep.content_type = "application/json"
+        rep.data = json.dumps(payload).encode("utf-8")
+
+
 def info(hab, rm, full=False):
     data = dict(
         name=hab.name,
@@ -1482,6 +1598,22 @@ class EndRole:
     eid: str
 
 
+def transferableReplyTsg(hab, sigs):
+    """Build a transferable reply signature group from signing key state.
+
+    Reply verification must reference the establishment event that supplied
+    the signing keys, not the latest event. A valid AID may have later
+    interaction events, so using ``hab.kever.serder`` can incorrectly point
+    Revery at an ``ixn`` instead of an establishment event.
+    """
+    return (
+        hab.kever.prefixer,
+        coring.Seqner(sn=hab.kever.lastEst.s),
+        coring.Saider(qb64=hab.kever.lastEst.d),
+        [core.Siger(qb64=sig) for sig in sigs],
+    )
+
+
 class EndRoleCollectionEnd:
     @staticmethod
     def on_get(req, rep, name=None, aid=None, role=None):
@@ -1655,13 +1787,7 @@ class EndRoleCollectionEnd:
                 description=f"error trying to create end role for unknown local AID {pre}"
             )
 
-        rsigers = [core.Siger(qb64=rsig) for rsig in rsigs]
-        tsg = (
-            hab.kever.prefixer,
-            coring.Seqner(sn=hab.kever.sn),
-            coring.Saider(qb64=hab.kever.serder.said),
-            rsigers,
-        )
+        tsg = transferableReplyTsg(hab, rsigs)
         try:
             agent.hby.rvy.processReply(rserder, tsgs=[tsg])
         except kering.UnverifiedReplyError:
@@ -1756,20 +1882,14 @@ class LocSchemeCollectionEnd:
         scheme = data["scheme"]
         url = data["url"]
 
-        rsigers = [core.Siger(qb64=rsig) for rsig in rsigs]
-        tsg = (
-            hab.kever.prefixer,
-            coring.Seqner(sn=hab.kever.sn),
-            coring.Saider(qb64=hab.kever.serder.said),
-            rsigers,
-        )
+        tsg = transferableReplyTsg(hab, rsigs)
         try:
             agent.hby.rvy.processReply(rserder, tsgs=[tsg])
         except kering.UnverifiedReplyError:
             pass
         except kering.ValidationError:
             raise falcon.HTTPBadRequest(
-                description="unable to verify end role reply message"
+                description="unable to verify location scheme reply message"
             )
 
         oid = ".".join([eid, scheme])

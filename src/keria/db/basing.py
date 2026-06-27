@@ -6,6 +6,8 @@ keria.db.basing module
 """
 
 from dataclasses import dataclass
+from typing import Any
+
 from ordered_set import OrderedSet as oset
 
 from keri.core import coring
@@ -27,6 +29,112 @@ class IndexRecord:
     paths: list
 
 
+@dataclass
+class W3CIssuanceRecord:
+    """Issuer-side lifecycle for one QVI-issued W3C credential artifact."""
+
+    d: str
+    issuerName: str
+    issuerAid: str
+    holderAid: str
+    sourceCredentialSaid: str
+    schemaSaid: str
+    issuerDid: str
+    holderDid: str
+    profile: str
+    state: str
+    created: str
+    updated: str
+    statusUrl: str
+    statusBaseUrl: str | None = None
+    sourceCredential: dict[str, Any] | None = None
+    vcJwt: str | None = None
+    decodedVc: dict[str, Any] | None = None
+    grantSaid: str | None = None
+    error: str | None = None
+
+
+@dataclass
+class W3CStatusProjectionRecord:
+    """Durable lookup metadata for public W3C credential status projection."""
+
+    credentialSaid: str
+    aid: str
+    name: str
+    issuerDid: str
+    statusBaseUrl: str
+    created: str
+    updated: str
+
+
+@dataclass
+class W3CHeldCredentialRecord:
+    """Holder-side imported portable W3C credential record."""
+
+    d: str
+    holderName: str
+    holderAid: str
+    holderDid: str
+    issuerAid: str
+    issuerDid: str
+    sourceCredentialSaid: str
+    schemaSaid: str
+    profile: str
+    vcJwt: str
+    decodedVc: dict[str, Any]
+    statusUrl: str
+    deliverySource: str
+    grantSaid: str | None
+    state: str
+    imported: str
+    updated: str
+    lastValidation: str
+    validationState: str
+    error: str | None = None
+
+
+@dataclass
+class W3CVerifierContactRecord:
+    """Holder-side memory of a verifier observed at runtime."""
+
+    d: str
+    holderName: str
+    holderAid: str
+    origin: str
+    label: str | None
+    formats: list[str]
+    created: str
+    updated: str
+    metadata: dict[str, Any]
+
+
+@dataclass
+class W3CPresentTxRecord:
+    """Short-lived holder-side W3C presentation transaction."""
+
+    d: str
+    holderName: str
+    holderAid: str
+    holderDid: str
+    contactId: str
+    requestDescriptor: dict[str, Any]
+    state: str
+    nonce: str | None
+    aud: str | None
+    requestUri: str | None
+    responseUri: str | None
+    matchedCredentialIds: list[str]
+    selectedCredentialId: str | None
+    vpJwt: str | None
+    submissionEndpoint: str | None
+    submissionState: str | None
+    verifierResponse: dict[str, Any] | str | None
+    created: str
+    updated: str
+    expires: str
+    error: str | None = None
+
+
 class AgencyBaser(dbing.LMDBer):
     """
     Agency database for tracking Agent tenants and their managed identifiers in this KERIA instance.
@@ -36,7 +144,7 @@ class AgencyBaser(dbing.LMDBer):
     TailDirPath = "keri/adb"
     AltTailDirPath = ".keri/adb"
     TempPrefix = "keri_adb_"
-    MaxNamedDBs = 10
+    MaxNamedDBs = 20
 
     def __init__(self, headDirPath=None, perm=None, reopen=False, **kwa):
         """
@@ -69,6 +177,21 @@ class AgencyBaser(dbing.LMDBer):
             .aids values are Prefixer of Controller AID (caid)
                 keyed by managed AID.
                 Maps managed AIDs to their Signify Controller AID (caid).
+            .w3cissu values are W3CIssuanceRecord
+                keyed by issuance SAID.
+                Tracks issuer-side W3C credential issuance lifecycles.
+            .w3cstat values are W3CStatusProjectionRecord
+                keyed by credential SAID.
+                Tracks durable public W3C status projection lookups.
+            .w3cheld values are W3CHeldCredentialRecord
+                keyed by held credential SAID.
+                Tracks holder-side imported W3C credential artifacts.
+            .w3cvcnt values are W3CVerifierContactRecord
+                keyed by contact SAID.
+                Tracks runtime W3C verifier contacts.
+            .w3cptx values are W3CPresentTxRecord
+                keyed by presentation transaction SAID.
+                Tracks holder presentation orchestration state.
 
         Notes:
             dupsort=True for sub DB means allow unique (key,pair) duplicates at a key.
@@ -86,6 +209,11 @@ class AgencyBaser(dbing.LMDBer):
         self.agnt = None
         self.ctrl = None
         self.aids = None
+        self.w3cissu = None
+        self.w3cstat = None
+        self.w3cheld = None
+        self.w3cvcnt = None
+        self.w3cptx = None
 
         super(AgencyBaser, self).__init__(
             headDirPath=headDirPath, perm=perm, reopen=reopen, **kwa
@@ -109,6 +237,41 @@ class AgencyBaser(dbing.LMDBer):
 
         # Sub-database keyed by qb64 AID mapping to the Prefixer object of the AID of its Agent
         self.aids = subing.CesrSuber(db=self, subkey="aids.", klas=coring.Prefixer)
+
+        # Sub-database keyed by W3C issuance SAID for issuer-side artifact lifecycle state
+        self.w3cissu = koming.Komer(
+            db=self,
+            subkey="w3cissu.",
+            schema=W3CIssuanceRecord,
+        )
+
+        # Sub-database keyed by credential SAID for public W3C status projection lookup metadata.
+        self.w3cstat = koming.Komer(
+            db=self,
+            subkey="w3cstat.",
+            schema=W3CStatusProjectionRecord,
+        )
+
+        # Sub-database keyed by held credential SAID for imported W3C artifacts
+        self.w3cheld = koming.Komer(
+            db=self,
+            subkey="w3cheld.",
+            schema=W3CHeldCredentialRecord,
+        )
+
+        # Sub-database keyed by runtime W3C verifier contact SAID
+        self.w3cvcnt = koming.Komer(
+            db=self,
+            subkey="w3cvcnt.",
+            schema=W3CVerifierContactRecord,
+        )
+
+        # Sub-database keyed by holder presentation transaction SAID
+        self.w3cptx = koming.Komer(
+            db=self,
+            subkey="w3cptx.",
+            schema=W3CPresentTxRecord,
+        )
 
 
 class Seeker(dbing.LMDBer):
