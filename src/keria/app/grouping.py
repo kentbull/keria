@@ -276,12 +276,12 @@ class MultisigJoinCollectionEnd:
 
 @dataclass
 class MultisigInceptEmbeds:
-    icp: Union["aiding.ICP_V_1", "aiding.ICP_V_2"]  # type: ignore
+    icp: Union["aiding.ICP_V_1", "aiding.ICP_V_2", "aiding.DIP_V_1", "aiding.DIP_V_2"]  # type: ignore
 
 
 @dataclass
 class MultisigRotateEmbeds:
-    rot: Union["credentialing.ROT_V_1", "credentialing.ROT_V_2"]  # type: ignore
+    rot: Union["credentialing.ROT_V_1", "credentialing.ROT_V_2", "credentialing.DRT_V_1", "credentialing.DRT_V_2"]  # type: ignore
 
 
 @dataclass
