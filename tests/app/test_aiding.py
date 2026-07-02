@@ -1822,9 +1822,18 @@ def test_identifier_resource_end(helpers):
 
 
 def test_oobi_ends(helpers):
-    with helpers.openKeria() as (agency, agent, app, client):
+    with (
+        helpers.openKeria() as (agency, agent, app, client),
+        helpers.openKeria(salter=core.Salter(raw=b"0123456789abcM01")) as (
+            _,
+            _,
+            otherApp,
+            otherClient,
+        ),
+    ):
         end = aiding.IdentifierCollectionEnd()
         app.add_route("/identifiers", end)
+        otherApp.add_route("/identifiers", aiding.IdentifierCollectionEnd())
 
         endRolesEnd = aiding.EndRoleCollectionEnd()
         app.add_route("/identifiers/{name}/endroles", endRolesEnd)
@@ -1914,6 +1923,54 @@ def test_oobi_ends(helpers):
             "http://127.0.0.1:3902/oobi/EHgwVwQT15OJvilVvW57HE4w0-GPs_Stj2OFoAHZSysY/agent/EI7AkI40M1"
             "1MS7lkTCb10JC9-nDt-tXwQh44OHAFlv_9"
         )
+        res = client.simulate_get("/identifiers/pal/oobis?role=agent&includeEid=true")
+        assert res.status_code == 200
+        assert res.json["oobis"] == [oobis[0]]
+
+        # Tests with actual multisig AID that Agent AID is not on OOBI unless includeEid is specified
+        group = helpers.createMultisigAid(
+            [client, otherClient],
+            "multisig",
+            [
+                ("multisig0", b"abcdef0123456789"),
+                ("multisig1", b"fedcba9876543210"),
+            ],
+        )[0]
+        groupPre = group["prefix"]
+        assert isinstance(agent.hby.habs[groupPre], habbing.SignifyGroupHab)
+        other = "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        # Just pin the endpoint role and locs records to simplify the test code as we are testing
+        # OOBI generation, not endrole or loc scheme addition/authorization
+        agent.hby.db.ends.pin(
+            keys=(groupPre, kering.Roles.agent, agent.agentHab.pre),
+            val=basing.EndpointRecord(allowed=True),
+        )
+        agent.hby.db.ends.pin(
+            keys=(groupPre, kering.Roles.agent, other),
+            val=basing.EndpointRecord(allowed=True),
+        )
+        agent.hby.db.locs.put(
+            keys=(other, kering.Schemes.http),
+            val=LocationRecord(url="http://127.0.0.1:3902"),
+        )
+
+        # without includeEid - should not have agent AID suffix
+        res = client.simulate_get("/identifiers/multisig/oobis?role=agent")
+        assert res.status_code == 200
+        assert res.json == {
+            "oobis": [f"http://127.0.0.1:3902/oobi/{groupPre}/agent"],
+            "role": "agent",
+        }
+
+        # with includeEid - should have agent AID suffix
+        res = client.simulate_get(
+            "/identifiers/multisig/oobis?role=agent&includeEid=true"
+        )
+        assert res.status_code == 200
+        assert set(res.json["oobis"]) == {
+            f"http://127.0.0.1:3902/oobi/{groupPre}/agent/{agent.agentHab.pre}",
+            f"http://127.0.0.1:3902/oobi/{groupPre}/agent/{other}",
+        }
 
         res = client.simulate_get("/identifiers/pal/oobis?role=witness")
         assert res.status_code == 200

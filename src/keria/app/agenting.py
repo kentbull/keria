@@ -2099,6 +2099,7 @@ class OobiResourceEnd:
             oobis.append(urljoin(up.geturl(), f"/oobi/{hab.pre}/controller"))
             res["oobis"] = oobis
         elif role in (kering.Roles.agent,):
+            includeEid = aiding.includeEidParam(req)
             oobis = []
             roleUrls = hab.fetchRoleUrls(
                 hab.pre, scheme=kering.Schemes.http, role=kering.Roles.agent
@@ -2110,15 +2111,18 @@ class OobiResourceEnd:
                     description=f"unable to query controller {hab.pre}, no http endpoint"
                 )
 
-            for eid, urls in roleUrls["agent"].items():
-                url = (
-                    urls[kering.Schemes.http]
-                    if kering.Schemes.http in urls
-                    else urls[kering.Schemes.https]
-                )
-                up = urlparse(url)
-                oobis.append(urljoin(up.geturl(), f"/oobi/{hab.pre}/agent/{eid}"))
-                res["oobis"] = oobis
+            # Outer for loops over multi-valued mict that could have multiple "agent" dict values
+            for eurls in roleUrls.naball(kering.Roles.agent):
+                for eid, urls in eurls.items():
+                    url = (
+                        urls[kering.Schemes.http]
+                        if kering.Schemes.http in urls
+                        else urls[kering.Schemes.https]
+                    )
+                    oobi = aiding.agentOobiUrl(hab, url, eid, includeEid=includeEid)
+                    if oobi not in oobis:
+                        oobis.append(oobi)
+            res["oobis"] = oobis
         else:
             rep.status = falcon.HTTP_404
             return

@@ -663,6 +663,12 @@ def test_keystate_ends(helpers):
 def test_oobi_ends(seeder, helpers):
     with (
         helpers.openKeria() as (agency, agent, app, client),
+        helpers.openKeria(salter=core.Salter(raw=b"0123456789abcM01")) as (
+            _,
+            _,
+            otherApp,
+            otherClient,
+        ),
         habbing.openHby(
             name="wes", salt=core.Salter(raw=b"wess-the-witness").qb64
         ) as wesHby,
@@ -681,6 +687,7 @@ def test_oobi_ends(seeder, helpers):
         # Register the identifier endpoint so we can create an AID for the test
         end = aiding.IdentifierCollectionEnd()
         app.add_route("/identifiers", end)
+        otherApp.add_route("/identifiers", aiding.IdentifierCollectionEnd())
         salt = b"0123456789abcdef"
         helpers.createAid(client, "pal", salt, wits=[wesHab.pre], toad="1")
         palPre = "EEkruFP-J0InOD9cYbNLlBxQtkLAbmJPNecSnBzJixP0"
@@ -831,6 +838,56 @@ def test_oobi_ends(seeder, helpers):
                 "/EI7AkI40M11MS7lkTCb10JC9-nDt-tXwQh44OHAFlv_9"
             ],
             "role": "agent",
+        }
+
+        result = client.simulate_get(path="/oobi/aggie?role=agent&includeEid=true")
+        assert result.status == falcon.HTTP_200
+        assert result.json["oobis"] == [
+            "http://127.0.0.1:3902/oobi/EHgwVwQT15OJvilVvW57HE4w0-GPs_Stj2OFoAHZSysY/agent"
+            "/EI7AkI40M11MS7lkTCb10JC9-nDt-tXwQh44OHAFlv_9"
+        ]
+
+        # Tests with actual multisig AID that Agent AID is not on OOBI unless includeEid is specified
+        group = helpers.createMultisigAid(
+            [client, otherClient],
+            "multisig",
+            [
+                ("multisig0", b"abcdef0123456789"),
+                ("multisig1", b"fedcba9876543210"),
+            ],
+        )[0]
+        groupPre = group["prefix"]
+        assert isinstance(agent.hby.habs[groupPre], habbing.SignifyGroupHab)
+        other = "EAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        # Just pin the endpoint role and locs records to simplify the test code as we are testing
+        # OOBI generation, not endrole or loc scheme addition/authorization
+        agent.hby.db.ends.pin(
+            keys=(groupPre, kering.Roles.agent, agent.agentHab.pre),
+            val=basing.EndpointRecord(allowed=True),
+        )
+        agent.hby.db.ends.pin(
+            keys=(groupPre, kering.Roles.agent, other),
+            val=basing.EndpointRecord(allowed=True),
+        )
+        agent.hby.db.locs.put(
+            keys=(other, kering.Schemes.http),
+            val=basing.LocationRecord(url=url),
+        )
+
+        # without includeEid - should not have agent AID suffix
+        result = client.simulate_get(path="/oobi/multisig?role=agent")
+        assert result.status == falcon.HTTP_200
+        assert result.json == {
+            "oobis": [f"http://127.0.0.1:3902/oobi/{groupPre}/agent"],
+            "role": "agent",
+        }
+
+        # with includeEid - should have agent AID suffix
+        result = client.simulate_get(path="/oobi/multisig?role=agent&includeEid=true")
+        assert result.status == falcon.HTTP_200
+        assert set(result.json["oobis"]) == {
+            f"http://127.0.0.1:3902/oobi/{groupPre}/agent/{agent.agentHab.pre}",
+            f"http://127.0.0.1:3902/oobi/{groupPre}/agent/{other}",
         }
 
 

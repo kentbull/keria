@@ -1308,6 +1308,24 @@ class OOBI:
     )
 
 
+def includeEidParam(req):
+    """Return True when the request explicitly asks for endpoint-qualified OOBIs."""
+    return req.params.get("includeEid", "").lower() in ("true", "1")
+
+
+def agentOobiUrl(hab, url, eid, includeEid=False):
+    """
+    Only return agent AID suffix when AID is single sig, by default.
+    Agent AID suffix not included by default for multisig/group habs.
+    """
+    up = urlparse(url)
+    path = f"/oobi/{hab.pre}/agent"
+    if includeEid or not isinstance(hab, habbing.SignifyGroupHab):
+        path = f"{path}/{eid}"
+
+    return urljoin(up.geturl(), path)
+
+
 class IdentifierOOBICollectionEnd:
     """
     This class represents the OOBI subresource collection endpoint for identifiers
@@ -1407,7 +1425,8 @@ class IdentifierOOBICollectionEnd:
             up = urlparse(url)
             oobis.append(urljoin(up.geturl(), f"/oobi/{hab.pre}/controller"))
             res["oobis"] = oobis
-        elif role in (kering.Roles.agent,):  # Fetch URL OOBIs for all witnesses
+        elif role in (kering.Roles.agent,):  # Fetch URL OOBIs for all agent endpoints
+            includeEid = includeEidParam(req)
             roleUrls = hab.fetchRoleUrls(
                 cid=hab.pre, role=kering.Roles.agent, scheme=kering.Schemes.http
             ) or hab.fetchRoleUrls(
@@ -1416,22 +1435,23 @@ class IdentifierOOBICollectionEnd:
             if kering.Roles.agent not in roleUrls:
                 res["oobis"] = []
             else:
-                aoobis = roleUrls[kering.Roles.agent]
-
                 oobis = list()
-                for agent in set(aoobis.keys()):
-                    murls = aoobis.naball(agent)
-                    for murl in murls:
-                        urls = []
-                        if kering.Schemes.http in murl:
-                            urls.extend(murl.naball(kering.Schemes.http))
-                        if kering.Schemes.https in murl:
-                            urls.extend(murl.naball(kering.Schemes.https))
-                        for url in urls:
-                            up = urlparse(url)
-                            oobis.append(
-                                urljoin(up.geturl(), f"/oobi/{hab.pre}/agent/{agent}")
-                            )
+                # Outer for loops over multi-valued mict that could have multiple "agent" dict values
+                for aoobis in roleUrls.naball(kering.Roles.agent):
+                    for agent in set(aoobis.keys()):
+                        murls = aoobis.naball(agent)
+                        for murl in murls:
+                            urls = []
+                            if kering.Schemes.http in murl:
+                                urls.extend(murl.naball(kering.Schemes.http))
+                            if kering.Schemes.https in murl:
+                                urls.extend(murl.naball(kering.Schemes.https))
+                            for url in urls:
+                                oobi = agentOobiUrl(
+                                    hab, url, agent, includeEid=includeEid
+                                )
+                                if oobi not in oobis:
+                                    oobis.append(oobi)
 
                 res["oobis"] = oobis
         elif role in (kering.Roles.mailbox,):  # Fetch URL OOBIs for all witnesses
