@@ -356,12 +356,16 @@ class AgentSpecResource:
             "oneOf": [
                 {"$ref": "#/components/schemas/ICP_V_1"},
                 {"$ref": "#/components/schemas/ICP_V_2"},
+                {"$ref": "#/components/schemas/DIP_V_1"},
+                {"$ref": "#/components/schemas/DIP_V_2"},
             ]
         }
         self.spec.components.schemas["Rot"] = {
             "oneOf": [
                 {"$ref": "#/components/schemas/ROT_V_1"},
                 {"$ref": "#/components/schemas/ROT_V_2"},
+                {"$ref": "#/components/schemas/DRT_V_1"},
+                {"$ref": "#/components/schemas/DRT_V_2"},
             ]
         }
         self.spec.components.schemas["Vcp"] = {
