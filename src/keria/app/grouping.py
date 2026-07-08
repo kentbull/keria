@@ -281,7 +281,12 @@ class MultisigInceptEmbeds:
 
 @dataclass
 class MultisigRotateEmbeds:
-    rot: Union["credentialing.ROT_V_1", "credentialing.ROT_V_2", "credentialing.DRT_V_1", "credentialing.DRT_V_2"]  # type: ignore
+    rot: Union[
+        "credentialing.ROT_V_1",
+        "credentialing.ROT_V_2",
+        "credentialing.DRT_V_1",
+        "credentialing.DRT_V_2",
+    ]  # type: ignore
 
 
 @dataclass
