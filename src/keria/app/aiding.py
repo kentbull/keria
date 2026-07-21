@@ -347,9 +347,12 @@ class AgentResourceEnd:
         ctrlHab = agent.hby.habByName(caid, ns="agent")
         ctrlHab.rotate(serder=rot, sigers=[core.Siger(qb64=sig) for sig in sigs])
 
-        # @TODO - foconnor: Not sure if this should be here - Signify is not signing headers for passcode rotation.
-        if not self.authn.inbound(req):
-            raise falcon.HTTPForbidden(description="invalid signature on request")
+        try:
+            self.authn.inbound(req)
+        except (kering.AuthNError, ValueError) as ex:
+            raise falcon.HTTPForbidden(
+                description="invalid signature on request"
+            ) from ex
 
         sxlt = body["sxlt"]
         agent.mgr.sxlt = sxlt
