@@ -837,8 +837,8 @@ def gatherArtifacts(
 ):
     """
     Gathers a list from the local database of all dependent credential artifacts needed by the
-    recipient to fully verify an ACDC including all KEL and TEL events for the issuer and issuee and
-    any of their (delegators.
+    recipient to fully verify an ACDC, including all KEL and TEL events for the issuer, any disclosed
+    issuee, and their known delegators.
 
     Parameters:
         hby: Habery to read KELs from
@@ -851,7 +851,8 @@ def gatherArtifacts(
     """
     messages = []
     issr = creder.issuer
-    isse = creder.attrib["i"] if "i" in creder.attrib else None
+    attrib = creder.attrib
+    isse = attrib.get("i") if isinstance(attrib, dict) else None
     regk = creder.regi
 
     # Get issuer delegation parent KELs
@@ -867,9 +868,9 @@ def gatherArtifacts(
         atc = msg[serder.size :]
         messages.append((serder, atc))
 
-    # If sending to recipient that is no the issuee then
-    # Get issuee KEL and delegation parent KELs
-    if isse != recp:
+    # Include the issuee KEL and delegation parents only when the issuee is
+    # disclosed and differs from the recipient.
+    if isse is not None and isse != recp:
         ikever = hby.db.kevers[isse]
         for msg in hby.db.cloneDelegation(ikever):
             serder = serdering.SerderKERI(raw=msg)
