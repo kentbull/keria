@@ -22,6 +22,7 @@ class HandleCORS(object):
         resp.set_header("Access-Control-Allow-Origin", "*")
         resp.set_header("Access-Control-Allow-Methods", "*")
         resp.set_header("Access-Control-Allow-Headers", "*")
+        resp.set_header("Access-Control-Expose-Headers", "*")
         resp.set_header("Access-Control-Max-Age", 1728000)  # 20 days
         if req.method == "OPTIONS":
             raise HTTPStatus(falcon.HTTP_200)
@@ -109,6 +110,7 @@ keriHeaders = [
     "signature-input",
     "signify-resource",
     "signify-timestamp",
+    "signify-receiver",
 ]
 
 corsMiddleware = falcon.CORSMiddleware(
@@ -116,11 +118,11 @@ corsMiddleware = falcon.CORSMiddleware(
 )
 
 
-def falconApp(logRequests=False):
+def falconApp(logRequests=False, request_type=falcon.Request):
     middlewares: list = [corsMiddleware]
     if logRequests:
         middlewares.append(RequestLoggerMiddleware())
-    return falcon.App(middleware=middlewares)
+    return falcon.App(middleware=middlewares, request_type=request_type)
 
 
 def createHttpServer(port, app, keypath=None, certpath=None, cafilepath=None):
