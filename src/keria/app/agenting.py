@@ -40,6 +40,7 @@ from keri.app import (
     connecting,
     grouping,
 )
+from keri.app import delegating as kdelegating
 from keri.app.grouping import Counselor
 from keri.app.keeping import Algos
 from keri.core import coring, parsing, eventing, routing, serdering
@@ -66,7 +67,7 @@ from ..core.httping import falconApp, createHttpServer
 from ..peer import exchanging as keriaexchanging
 from .specing import AgentSpecResource
 from ..core import authing, longrunning, httping
-from ..core.authing import Authenticater
+from ..core.authing import SignedHeaderAuthenticator
 from ..core.keeping import RemoteManager
 from ..db import basing
 from .credentialing import (
@@ -725,6 +726,7 @@ class Agent(doing.DoDoer):
         handlers = [challengeHandler]
         self.exc = exchanging.Exchanger(hby=hby, handlers=handlers)
         grouping.loadHandlers(exc=self.exc, mux=self.mux)
+        kdelegating.loadHandlers(hby=self.hby, exc=self.exc, notifier=self.notifier)
         protocoling.loadHandlers(hby=self.hby, exc=self.exc, notifier=self.notifier)
         self.submitter = Submitter(
             hby=hby, submits=self.submits, witRec=self.witSubmitDoer
@@ -941,15 +943,13 @@ def createAdminServerDoer(config: KERIAServerConfig, agency: Agency):
     Returns the Doer and the Falcon app so the HTTP app can use it for OpenAPI docs.
     """
     # Create Authenticater for verifying signatures on all requests
-    authn = Authenticater(agency=agency)
+    authn = SignedHeaderAuthenticator(agency=agency)
 
-    adminApp = falconApp(config.logRequests)
+    adminApp = falconApp(config.logRequests, request_type=authing.ModifiableRequest)
     if config.cors:
         adminApp.add_middleware(middleware=httping.HandleCORS())
     adminApp.add_middleware(
-        authing.SignatureValidationComponent(
-            agency=agency, authn=authn, allowed=["/agent"]
-        )
+        authing.AuthenticationMiddleware(agency=agency, authn=authn, allowed=["/agent"])
     )
     adminApp.req_options.media_handlers.update(media.Handlers())
     adminApp.resp_options.media_handlers.update(media.Handlers())
@@ -1021,8 +1021,8 @@ def setupDoers(agency: Agency, config: KERIAServerConfig, temp=False, cf=None):
     """
     Sets up the HIO coroutines the KERIA agent server is composed of including three HTTP servers for a KERIA agent server:
     1. Boot server for bootstrapping agents. Signify calls this with a signed inception event.
-    2. Admin server for administrative tasks like creating agents.
-    3. HTTP server for all other agent operations.
+    2. Admin server for any Signify client related actions after bootstrapping.
+    3. HTTP server for all other external agents send KERI events or messages for interactions.
 
     Parameters:
         config (KERIAServerConfig): Configuration for the KERIA server.

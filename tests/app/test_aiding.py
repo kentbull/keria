@@ -11,9 +11,11 @@ from dataclasses import asdict
 import json
 import os
 from datetime import datetime
+from unittest import mock
 
 import falcon
 from falcon import testing
+import pytest
 from keri import core
 from keri.app import habbing, keeping, configing
 from keri.app.keeping import Algos
@@ -395,6 +397,74 @@ def test_agent_resource(helpers, mockHelpingNowUTC):
             "description": "required field 'keys' missing from body",
             "title": "400 Bad Request",
         }
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(None, id="authenticated"),
+        pytest.param(kering.AuthNError(), id="authn-error"),
+        pytest.param(ValueError(), id="value-error"),
+    ],
+)
+def test_agent_resource_authentication(helpers, error):
+    with helpers.openKeria() as (agency, agent, app, client):
+        # Setup KERIA endpoint
+        authn = mock.Mock()
+        if error is None:
+            authn.inbound.return_value = None
+        else:
+            authn.inbound.side_effect = error
+
+        agentEnd = aiding.AgentResourceEnd(agency=agency, authn=authn)
+        app.add_route("/agent/{caid}", agentEnd)
+        client = testing.TestClient(app=app)
+
+        # Create a controller rotation event
+        ctrlHab = agent.hby.habByName(agent.caid, ns="agent")
+        salter = core.Salter(raw=b"0123456789abcdefghijk")
+        creator = keeping.SaltyCreator(
+            salt=salter.qb64, stem="signify:controller", tier=coring.Tiers.low
+        )
+        signers = creator.create(pidx=0, ridx=1, count=1)
+        nsigners = creator.create(pidx=0, ridx=2, count=1)
+        keys = [signer.verfer.qb64 for signer in signers]
+        ndigs = [coring.Diger(ser=signer.verfer.qb64b).qb64 for signer in nsigners]
+        rot = eventing.rotate(
+            pre=agent.caid,
+            keys=keys,
+            dig=ctrlHab.kever.serder.said,
+            ndigs=ndigs,
+        )
+        sigs = [signer.sign(ser=rot.raw, index=0).qb64 for signer in signers]
+        body = {"rot": rot.ked, "sigs": sigs, "sxlt": agent.mgr.sxlt, "keys": {}}
+
+        # Send request - same for all parameterized instances
+        with (
+            mock.patch.object(ctrlHab, "rotate") as rotate,
+            mock.patch.object(agent.mgr, "delete_sxlt") as delete_sxlt,
+        ):
+            res = client.simulate_put(path=f"/agent/{agent.caid}", json=body)
+
+        # verify rotate is called with our actual rotation
+        rotate.assert_called_once()
+        call = rotate.call_args.kwargs
+        assert call["serder"].raw == rot.raw
+        assert [siger.qb64 for siger in call["sigers"]] == sigs
+        authn.inbound.assert_called_once()
+
+        # Check result - some should succeed (None) and some should fail
+        if error is None:
+            assert res.status_code == 204
+            assert agent.mgr.sxlt == agent.mgr.sxlt
+            delete_sxlt.assert_called_once_with()
+        else:
+            assert res.status_code == 403
+            assert res.json == {
+                "description": "invalid signature on request",
+                "title": "403 Forbidden",
+            }
+            delete_sxlt.assert_not_called()
 
 
 def test_identifier_collection_end(helpers):

@@ -30,8 +30,8 @@ logger = ogler.getLogger()
 
 
 def loadEnds(app, agency, authn):
-    groupEnd = AgentResourceEnd(agency=agency, authn=authn)
-    app.add_route("/agent/{caid}", groupEnd)
+    agentEnd = AgentResourceEnd(agency=agency, authn=authn)
+    app.add_route("/agent/{caid}", agentEnd)
 
     aidsEnd = IdentifierCollectionEnd()
     app.add_route("/identifiers", aidsEnd)
@@ -347,8 +347,12 @@ class AgentResourceEnd:
         ctrlHab = agent.hby.habByName(caid, ns="agent")
         ctrlHab.rotate(serder=rot, sigers=[core.Siger(qb64=sig) for sig in sigs])
 
-        if not self.authn.verify(req):
-            raise falcon.HTTPForbidden(description="invalid signature on request")
+        try:
+            self.authn.inbound(req)
+        except (kering.AuthNError, ValueError) as ex:
+            raise falcon.HTTPForbidden(
+                description="invalid signature on request"
+            ) from ex
 
         sxlt = body["sxlt"]
         agent.mgr.sxlt = sxlt
