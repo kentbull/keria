@@ -157,6 +157,142 @@ def test_ipex_admit(helpers, mockHelpingNowIso8601):
         }
 
 
+@pytest.mark.parametrize(
+    "compact", (False, True), ids=("expanded-untargeted", "compact-attributes")
+)
+def test_gather_artifacts_skips_issuee_kel_when_issuee_not_disclosed(helpers, compact):
+    salt = b"0123456789abcdef"
+
+    with (
+        habbing.openHab(name="issuer", salt=salt, temp=True) as (issuerHby, issuerHab),
+        helpers.withIssuer(name="issuer", hby=issuerHby) as issuer,
+    ):
+        disclosee = issuerHby.makeHab(name="disclosee")
+        creder = proving.credential(
+            issuer=issuerHab.pre,
+            schema=issuer.QVI,
+            recipient=None,
+            data={"claim": "An issuer-authored observation"},
+            source={},
+            rules={},
+        )
+
+        if compact:
+            sad = dict(creder.sad)
+            sad["d"] = ""
+            # use the digest of the ACDC above as the entire attributes "a" field
+            # for the compact ACDC variant test
+            sad["a"] = creder.attrib["d"]
+            creder = serdering.SerderACDC(sad=sad, makify=True)
+            assert isinstance(creder.attrib, str)
+        else:
+            assert "i" not in creder.attrib
+
+        # trigger happy path flows - should pull in artifact whether compact or not
+        artifacts = ipexing.gatherArtifacts(
+            issuerHby, issuer.rgy.reger, creder, disclosee.pre
+        )
+
+        assert [serder.pre for serder, _ in artifacts] == [issuerHab.pre]
+
+
+def test_gather_artifacts_skips_issuee_kel_when_recipient_is_issuee(helpers):
+    salt = b"0123456789abcdef"
+
+    with (
+        habbing.openHab(name="issuer", salt=salt, temp=True) as (issuerHby, issuerHab),
+        helpers.withIssuer(name="issuer", hby=issuerHby) as issuer,
+    ):
+        issuee = issuerHby.makeHab(name="issuee")
+        creder = proving.credential(
+            issuer=issuerHab.pre,
+            schema=issuer.QVI,
+            recipient=issuee.pre,
+            data={"claim": "An issuer-authored observation"},
+            source={},
+            rules={},
+        )
+
+        artifacts = ipexing.gatherArtifacts(
+            issuerHby, issuer.rgy.reger, creder, issuee.pre
+        )
+
+        assert [serder.pre for serder, _ in artifacts] == [issuerHab.pre]
+
+
+def test_gather_artifacts_includes_issuee_delegation_chain_for_distinct_recipient(
+    helpers,
+):
+    with helpers.openKeria() as (_, agent, _, _):
+        issuer = agent.hby.makeHab(name="issuer")
+        disclosee = agent.hby.makeHab(name="disclosee")
+        creder = proving.credential(
+            issuer=issuer.pre,
+            schema="EFgnk_c08WmZGgv9_mpldibRuqFMTQN-rAgtD-TCOwbs",
+            recipient=agent.agentHab.pre,
+            data={"claim": "An issuer-authored observation"},
+            source={},
+            rules={},
+        )
+
+        artifacts = ipexing.gatherArtifacts(
+            agent.hby, agent.rgy.reger, creder, disclosee.pre
+        )
+
+        assert [serder.pre for serder, _ in artifacts] == [
+            issuer.pre,
+            agent.caid,
+            agent.agentHab.pre,
+        ]
+
+
+def test_gather_artifacts_includes_issuer_delegation_chain_for_delegated_issuer(
+    helpers,
+):
+    with helpers.openKeria() as (_, agent, _, _):
+        disclosee = agent.hby.makeHab(name="disclosee")
+        creder = proving.credential(
+            issuer=agent.agentHab.pre,
+            schema="EFgnk_c08WmZGgv9_mpldibRuqFMTQN-rAgtD-TCOwbs",
+            recipient=None,
+            data={"claim": "An issuer-authored observation"},
+            source={},
+            rules={},
+        )
+
+        artifacts = ipexing.gatherArtifacts(
+            agent.hby, agent.rgy.reger, creder, disclosee.pre
+        )
+
+        assert [serder.pre for serder, _ in artifacts] == [
+            agent.caid,
+            agent.agentHab.pre,
+        ]
+
+
+def test_gather_artifacts_includes_registry_and_issuance_tels(helpers, seeder):
+    salt = b"0123456789abcdef"
+
+    with (
+        habbing.openHab(name="issuer", salt=salt, temp=True) as (issuerHby, issuerHab),
+        helpers.withIssuer(name="issuer", hby=issuerHby) as issuer,
+    ):
+        seeder.seedSchema(issuerHby.db)
+        issuee = issuerHby.makeHab(name="issuee")
+        issuer.createRegistry(issuerHab.pre, name="issuer")
+        credential_said = issuer.issueQVIvLEI(
+            "issuer", issuerHab, issuee.pre, "78I9GKEFM361IFY3PIN0"
+        )
+        creder, _, _, _ = issuer.rgy.reger.cloneCred(said=credential_said)
+
+        artifacts = ipexing.gatherArtifacts(
+            issuerHby, issuer.rgy.reger, creder, issuee.pre
+        )
+
+        assert creder.regi is not None
+        assert [serder.ilk for serder, _ in artifacts][-2:] == ["vcp", "iss"]
+
+
 def test_ipex_grant(helpers, mockHelpingNowIso8601, seeder):
     salt = b"0123456789abcdef"
 
