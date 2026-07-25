@@ -957,6 +957,18 @@ def test_identifier_collection_end(helpers):
             "ED7Jk3MscDy8IHtb2k1k6cs0Oe5rEb3_8XKD1Ut_gCo8",
         ]
 
+        # A Signify group cannot elect a sender before signatures are stored.
+        group_hab = agent.hby.habs[serder.pre]
+        assert isinstance(group_hab, habbing.SignifyGroupHab)
+        assert type(agent.exc) is exchanging.Exchanger
+
+        unsigned, _ = exchanging.exchange(
+            route="/test/lead",
+            sender=group_hab.pre,
+            payload={"case": "no-signatures"},
+        )
+        assert agent.exc.lead(group_hab, unsigned.said) is False
+
         # Test Group Members
 
         # try with bad aid alias
