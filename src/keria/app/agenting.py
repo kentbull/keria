@@ -702,7 +702,7 @@ class Agent(doing.DoDoer):
             self.witq,
             self.witPub,
             self.rep,
-            self.swain,
+            # Counselor is the sole scheduler parent for the shared Anchorer.
             self.counselor,
             self.witDoer,
             *oobiery.doers,
@@ -1273,7 +1273,7 @@ class GrantDoer(doing.Doer):
         return agent_evts
 
     def getCredArtifacts(self, recp, credSaid):
-        """Send to the recipient the ACDC and the KELs of the issuer, holder, and any delegators."""
+        """Return supporting artifacts for the ACDC embedded in a grant."""
         creder = self.rgy.reger.creds.get(keys=(credSaid,))
         cred_artifacts = ipexing.gatherArtifacts(self.hby, self.rgy.reger, creder, recp)
         chain_artifacts = self.getChainedArtifacts(recp, creder)
@@ -1293,15 +1293,33 @@ class GrantDoer(doing.Doer):
             chain_artifacts.append((source, atc))
         return chain_artifacts
 
+    @staticmethod
+    def deduplicateArtifacts(artifacts):
+        """Keep the first occurrence of each exact serialized artifact frame."""
+        seen = set()
+        unique = []
+
+        for serder, attachment in artifacts:
+            frame = bytes(serder.raw) + bytes(attachment)
+            if frame in seen:
+                continue
+
+            seen.add(frame)
+            unique.append((serder, attachment))
+
+        return unique
+
     def postGrant(self):
         """
-        Presents an ACDC by sending all relevant data and cryptographic artifacts in the following order:
+        Present an ACDC using the historical IPEX ordering:
         - the agent KEL artifacts, including any delegation chain artifats
         - the issuer KEL artifacts, including delegation artifacts
         - the holder KEL artifacts, including delegation artifacts
         - the ACDC registry artifacts
-        - the ACDC credential itself
-        This is repeated for any chained credentials except that the agent KEL is only sent once.
+        - standalone chained credentials
+        - the grant EXN containing the primary ACDC
+        Supporting artifacts are repeated for chained credentials, while the
+        agent KEL and grant EXN are each sent once.
         """
         msg = self.grant_msg
         said = msg["said"]
@@ -1309,7 +1327,7 @@ class GrantDoer(doing.Doer):
             self.grants.append(msg)
             return
 
-        serder, pathed = exchanging.cloneMessage(self.hby, said)
+        grant, _ = exchanging.cloneMessage(self.hby, said)
 
         pre = msg["pre"]
         rec = msg["rec"]
@@ -1321,16 +1339,29 @@ class GrantDoer(doing.Doer):
                 )
                 try:
                     agent_evts = self.gatherAgentKEL(pre, recp, postman)
-                    credSaid = serder.ked["e"]["acdc"]["d"]
+                    credSaid = grant.ked["e"]["acdc"]["d"]
                     cred_artifacts = self.getCredArtifacts(recp, credSaid)
                     artifacts = agent_evts + cred_artifacts
-                    # Queue the artifacts for later sending by postman.deliver()
-                    for serder, atc in artifacts:
-                        postman.send(serder=serder, attachment=atc)
+                    unique_artifacts = self.deduplicateArtifacts(artifacts)
+                    logger.info(
+                        "Grant %s to %s queued %d of %d artifact frames",
+                        said,
+                        recp,
+                        len(unique_artifacts),
+                        len(artifacts),
+                    )
+                    for artifact, attachment in unique_artifacts:
+                        postman.send(serder=artifact, attachment=attachment)
+
+                    # Preserve the IPEX contract: the recipient obtains the
+                    # primary ACDC from this final grant EXN, not the stream.
+                    grant_atc = exchanging.serializeMessage(self.hby, said)
+                    del grant_atc[: grant.size]
+                    postman.send(serder=grant, attachment=grant_atc)
                 except kering.ValidationError:
                     logger.info(f"unable to send to recipient={recp}")
                 except KeyError:
-                    logger.info(f"invalid grant message={serder.ked}")
+                    logger.info(f"invalid grant message={grant.ked}")
                 else:
                     doer = doing.DoDoer(doers=postman.deliver())
                     self.parent.extend([doer])

@@ -121,6 +121,110 @@ def test_agent_uses_signify_exchanger(helpers):
         assert isinstance(agent.exc, agenting.SignifyExchanger)
 
 
+def test_grant_artifact_deduplication_preserves_protocol_order():
+    """Only byte-identical frames are removed from one assembled grant stream."""
+
+    artifact_a = (SimpleNamespace(raw=b"A"), bytearray(b"-attachment"))
+    duplicate_a = (SimpleNamespace(raw=b"A"), bytearray(b"-attachment"))
+    new_attachment_a = (SimpleNamespace(raw=b"A"), bytearray(b"-other"))
+    artifact_b = (SimpleNamespace(raw=b"B"), bytearray(b"-attachment"))
+
+    unique = agenting.GrantDoer.deduplicateArtifacts(
+        [artifact_a, duplicate_a, new_attachment_a, artifact_b]
+    )
+
+    assert unique == [artifact_a, new_attachment_a, artifact_b]
+
+
+def test_grant_artifacts_exclude_primary_credential():
+    """The grant EXN, not its supporting stream, carries the primary ACDC."""
+
+    primary = SimpleNamespace(said="primary")
+    primary_artifacts = [("primary-kel", b""), ("primary-tel", b"")]
+    chain_artifacts = [("chain-acdc", b"-chain-seal")]
+    doer = object.__new__(agenting.GrantDoer)
+    doer.hby = object()
+    doer.rgy = SimpleNamespace(
+        reger=SimpleNamespace(
+            creds=SimpleNamespace(get=mock.Mock(return_value=primary)),
+        )
+    )
+
+    with (
+        mock.patch.object(
+            agenting.ipexing,
+            "gatherArtifacts",
+            return_value=primary_artifacts,
+        ),
+        mock.patch.object(
+            doer,
+            "getChainedArtifacts",
+            return_value=chain_artifacts,
+        ),
+    ):
+        artifacts = doer.getCredArtifacts("recipient", primary.said)
+
+    assert artifacts == primary_artifacts + chain_artifacts
+
+
+def test_grant_delivery_ends_with_grant_exn():
+    """Supporting artifacts precede the grant containing the primary ACDC."""
+
+    grant = SimpleNamespace(
+        raw=b"grant",
+        size=5,
+        ked={"e": {"acdc": {"d": "credential"}}},
+    )
+    artifact = SimpleNamespace(raw=b"support")
+    postman = SimpleNamespace(
+        send=mock.Mock(),
+        deliver=mock.Mock(return_value=[]),
+    )
+    parent = SimpleNamespace(extend=mock.Mock())
+    doer = object.__new__(agenting.GrantDoer)
+    doer.grant_msg = {
+        "said": "grant-said",
+        "pre": "group",
+        "rec": ["recipient"],
+    }
+    doer.hby = SimpleNamespace(habs={"group": object()})
+    doer.rgy = object()
+    doer.agentHab = object()
+    doer.exc = SimpleNamespace(
+        complete=mock.Mock(return_value=True),
+        lead=mock.Mock(return_value=True),
+    )
+    doer.parent = parent
+    doer.grants = decking.Deck()
+    doer.gatherAgentKEL = mock.Mock(return_value=[(artifact, b"-support")])
+    doer.getCredArtifacts = mock.Mock(return_value=[])
+
+    with (
+        mock.patch.object(
+            agenting.exchanging,
+            "cloneMessage",
+            return_value=(grant, {}),
+        ),
+        mock.patch.object(
+            agenting.exchanging,
+            "serializeMessage",
+            return_value=bytearray(b"grant-signed"),
+        ),
+        mock.patch.object(
+            agenting.forwarding,
+            "StreamPoster",
+            return_value=postman,
+        ),
+    ):
+        assert doer.postGrant() is True
+
+    assert postman.send.call_args_list == [
+        mock.call(serder=artifact, attachment=b"-support"),
+        mock.call(serder=grant, attachment=bytearray(b"-signed")),
+    ]
+    parent.extend.assert_called_once()
+
+
 def test_setup_no_http():
     config = agenting.KERIAServerConfig(
         name="test",
@@ -302,6 +406,11 @@ def test_load_tocks_config(helpers):
         }
 
         assert agent.tocks == {"initer": 0.0, "escrower": 1.0}
+
+        # The shared Anchorer must have exactly one scheduler parent. Scheduling
+        # it here as well would run a second generator tree over the same state.
+        assert agent.swain not in agent.doers
+        assert agent.swain in agent.counselor.doers
 
         escrower_doer = next(
             (doer for doer in agent.doers if isinstance(doer, agenting.Escrower)), None

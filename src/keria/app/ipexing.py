@@ -285,9 +285,8 @@ class IpexGrantCollectionEnd:
         # now get rid of the event so we can pass it as atc to send
         del ims[: serder.size]
 
-        agent.exchanges.append(
-            dict(said=serder.said, pre=hab.pre, rec=rec, topic="credential")
-        )
+        # GrantDoer sends the supporting artifacts and this grant together so
+        # the externally delivered grant remains the final presentation frame.
         agent.grants.append(dict(said=ked["d"], pre=hab.pre, rec=rec))
 
         return agent.monitor.submit(
@@ -350,9 +349,8 @@ class IpexGrantCollectionEnd:
         serder = serdering.SerderKERI(sad=grant)
         ims = bytearray(serder.raw) + pathed["exn"]
         agent.parser.parseOne(ims=ims)
-        agent.exchanges.append(
-            dict(said=serder.said, pre=hab.pre, rec=[grantRec], topic="credential")
-        )
+        # The outer multisig EXN still coordinates group members. GrantDoer
+        # owns external delivery of the embedded grant and its artifacts.
         agent.grants.append(dict(said=grant["d"], pre=hab.pre, rec=[grantRec]))
 
         return agent.monitor.submit(

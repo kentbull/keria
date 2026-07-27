@@ -506,7 +506,7 @@ def test_ipex_grant(helpers, mockHelpingNowIso8601, seeder):
             "metadata": {"said": "ELkQART3yXFd8C6ImzGyqlDrgVUDtCfh1Goqr1PCbi9r"},
             "name": "exchange.ELkQART3yXFd8C6ImzGyqlDrgVUDtCfh1Goqr1PCbi9r",
         }
-        assert len(agent.exchanges) == 1
+        assert len(agent.exchanges) == 0
         assert len(agent.grants) == 1
 
         ims = eventing.messagize(serder=exn, sigers=[core.Siger(qb64=sigs[0])])
@@ -1197,7 +1197,8 @@ def test_multisig(seeder, helpers):
         assert res.status_code == 200
 
         agent0.exchanges.popleft()  # The multisig/exn
-        assert agent0.exchanges.popleft()["rec"][0] == holderPre  # The grant
+        assert len(agent0.exchanges) == 0
+        assert len(agent0.grants) == 1
 
         # Package up the GRANT into a multisig/exn from participant 1 to send to participant 0
         multiExnSerder, end = exchanging.exchange(
@@ -1220,7 +1221,8 @@ def test_multisig(seeder, helpers):
         assert res.status_code == 200
 
         agent1.exchanges.popleft()  # The multisig/exn
-        assert agent1.exchanges.popleft()["rec"][0] == holderPre  # The grant
+        assert len(agent1.exchanges) == 0
+        assert len(agent1.grants) == 1
 
         # Wait until the GRANT has been persisted by Agent0
         while agent0.exc.complete(said=grantSerder.said) is not True:
@@ -1614,7 +1616,8 @@ def test_multisig(seeder, helpers):
         assert res.status_code == 200
 
         hagent0.exchanges.popleft()  # The multisig/exn
-        assert hagent0.exchanges.popleft()["rec"][0] == verifierPre  # The grant
+        assert len(hagent0.exchanges) == 0
+        assert len(hagent0.grants) == 1
 
         multiExnSerder1, end = exchanging.exchange(
             route="/multisig/exn",
@@ -1636,7 +1639,8 @@ def test_multisig(seeder, helpers):
         assert res.status_code == 200
 
         hagent1.exchanges.popleft()  # The multisig/exn
-        assert hagent1.exchanges.popleft()["rec"][0] == verifierPre  # The grant
+        assert len(hagent1.exchanges) == 0
+        assert len(hagent1.grants) == 1
 
         while hagent0.exc.complete(said=grantSerder.said) is not True:
             doist.recur(deeds=deeds)

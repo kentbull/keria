@@ -103,10 +103,6 @@ def test_delegate_request_notification(helpers):
             parsing.Parser().parse(ims=bytearray(msg), kvy=toragent.kvy, local=True)
 
         anchorer.delegation(pre=teehab.pre, proxy=fakeproxy)
-        # Drive only the escrow branch that emits the outbound messages.  Do
-        # not run the Poster's deliver loop here; keeping the queued messages
-        # lets this test assert both the request EXN and the raw delegated event.
-        anchorer.processPartialWitnessEscrow()
 
         evts = list(anchorer.postman.evts)
         assert len(evts) == 2

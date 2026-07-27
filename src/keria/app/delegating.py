@@ -89,6 +89,10 @@ class Anchorer(doing.DoDoer):
         self.witDoer.msgs.append(dict(pre=pre, sn=srdr.sn))
         self.hby.db.dpwe.pin(keys=(srdr.pre, srdr.said), val=srdr)
 
+        # A witnessless local event is ready now. Advance it without waiting
+        # for the periodic delegation escrow pass.
+        self.processPartialWitnessEscrow()
+
     def complete(self, prefixer, seqner, saider=None):
         """Check for completed delegation protocol for the specific event
 
