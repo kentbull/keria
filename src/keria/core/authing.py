@@ -11,9 +11,9 @@ import sys
 from dataclasses import dataclass
 from io import BytesIO
 from enum import Enum
-from itertools import chain
 from urllib.parse import quote, unquote, unquote_to_bytes, urlsplit
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import falcon
 import pysodium
@@ -23,10 +23,12 @@ from keri.core import coring, MtrDex
 from keri.end import ending
 from keri.help import helping
 
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from keria import log_name, ogler
 
 if TYPE_CHECKING:
     from keria.app.agenting import Agency
+
+logger = ogler.getLogger(log_name)
 
 ESSR_CONTEXT_KEY = "keria.essr.context"
 HTTP_TOKEN = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
@@ -318,7 +320,7 @@ class ESSRAuthenticator(Authenticator):
         innerHeaders = [
             (name, value)
             for name, value in headers
-            if name.lower() != "signify-resource" and not isCorsHeader(name)
+            if name.lower() != "signify-resource"
         ]
         innerHeaders.append(("signify-resource", agent.agentHab.pre))
         inner = self.serializeResponse(context.protocol, status, innerHeaders, body)
@@ -400,6 +402,8 @@ class ESSRAuthenticator(Authenticator):
             raise ValueError("ESSR request target must use HTTP or HTTPS")
         if not splitUrl.netloc or hostname is None:
             raise ValueError("ESSR request target must include an authority")
+        if splitUrl.netloc.endswith(":"):
+            raise ValueError("ESSR request target must not include an empty port")
         if splitUrl.username is not None or splitUrl.password is not None:
             raise ValueError("ESSR request target must not include userinfo")
         if splitUrl.fragment:
@@ -477,8 +481,6 @@ class ESSRAuthenticator(Authenticator):
             "REMOTE_PORT",
             "SERVER_SOFTWARE",
             "wsgi.file_wrapper",
-            "wsgi.server_name",
-            "wsgi.server_version",
         ):
             if key in outer:
                 environ[key] = outer[key]
@@ -527,8 +529,10 @@ class ESSRResponseWrapper:
         self.authn = authn
 
     def __call__(self, environ, start_response):
+        if environ.get("PATH_INFO") != "/" or environ.get("REQUEST_METHOD") != "POST":
+            return self.app(environ, start_response)
+
         captured: dict[str, Any] = {}
-        written: list[bytes] = []
 
         def capture(status, headers, exc_info=None):
             if exc_info is not None and captured:
@@ -537,7 +541,7 @@ class ESSRResponseWrapper:
                 raise AssertionError("start_response called more than once")
             captured["status"] = status
             captured["headers"] = list(headers)
-            return written.append
+            return self._unsupportedWrite
 
         iterable = self.app(environ, capture)
         if not captured:
@@ -548,9 +552,7 @@ class ESSRResponseWrapper:
 
         context = environ.get(ESSR_CONTEXT_KEY)
         if context is None:
-            writer = start_response(captured["status"], captured["headers"])
-            for chunk in written:
-                writer(chunk)
+            start_response(captured["status"], captured["headers"])
             return iterable
 
         headers = captured["headers"]
@@ -564,17 +566,21 @@ class ESSRResponseWrapper:
                 context,
                 captured["status"],
                 innerHeaders,
-                written,
                 iterable,
             )
             outerStatus, outerHeaders, ciphertext = self.authn.wrapResponse(
                 context, status, innerHeaders, body, cors
             )
         except Exception:
+            logger.exception("Failed to protect finalized ESSR response")
             return self._outerError(start_response, cors)
 
         start_response(outerStatus, outerHeaders)
         return [ciphertext]
+
+    @staticmethod
+    def _unsupportedWrite(_data):
+        raise RuntimeError("Falcon must return response bytes as a WSGI iterable")
 
     @staticmethod
     def _close(iterable):
@@ -582,19 +588,18 @@ class ESSRResponseWrapper:
         if close is not None:
             close()
 
-    def _finalizedBody(self, context, status, headers, written, iterable):
+    def _finalizedBody(self, context, status, headers, iterable):
         try:
             code = int(status.partition(" ")[0])
         except ValueError:
             self._close(iterable)
             return self._innerError(
-                context, falcon.HTTP_500, "Falcon returned an invalid status."
+                falcon.HTTP_500, "Falcon returned an invalid status."
             )
 
         if 100 <= code < 200:
             self._close(iterable)
             return self._innerError(
-                context,
                 falcon.HTTP_500,
                 "ESSR does not support a standalone informational response.",
             )
@@ -612,7 +617,6 @@ class ESSRResponseWrapper:
         if self._headerValues(headers, "transfer-encoding"):
             self._close(iterable)
             return self._innerError(
-                context,
                 falcon.HTTP_500,
                 "Transfer-Encoding is not supported inside ESSR.",
             )
@@ -621,55 +625,40 @@ class ESSRResponseWrapper:
         if not lengths:
             self._close(iterable)
             return self._innerError(
-                context,
                 falcon.HTTP_501,
                 "Unbounded response streams are not supported by ESSR.",
             )
         if len(lengths) != 1 or not lengths[0].isdecimal():
             self._close(iterable)
-            return self._innerError(
-                context, falcon.HTTP_500, "Invalid response Content-Length."
-            )
+            return self._innerError(falcon.HTTP_500, "Invalid response Content-Length.")
 
         expected = int(lengths[0])
-        if expected == 0:
-            if any(written):
-                self._close(iterable)
-                return self._innerError(
-                    context, falcon.HTTP_500, "Response exceeded Content-Length."
-                )
-            self._close(iterable)
-            headers = self._replaceHeader(headers, "content-length", "0")
-            return status, headers, b""
-
         chunks: list[bytes] = []
         size = 0
         try:
-            for chunk in chain(written, iterable):
+            for chunk in iterable:
                 if not isinstance(chunk, bytes):
                     return self._innerError(
-                        context, falcon.HTTP_500, "Invalid ESSR response body chunk."
+                        falcon.HTTP_500, "Invalid ESSR response body chunk."
                     )
                 if not chunk:
                     continue
                 if size + len(chunk) > expected:
                     return self._innerError(
-                        context, falcon.HTTP_500, "Response exceeded Content-Length."
+                        falcon.HTTP_500, "Response exceeded Content-Length."
                     )
                 chunks.append(chunk)
                 size += len(chunk)
-                if size == expected:
-                    break
         except Exception:
             return self._innerError(
-                context, falcon.HTTP_500, "Failed to read the ESSR response body."
+                falcon.HTTP_500, "Failed to read the ESSR response body."
             )
         finally:
             self._close(iterable)
 
         if size != expected:
             return self._innerError(
-                context, falcon.HTTP_500, "Response ended before Content-Length."
+                falcon.HTTP_500, "Response ended before Content-Length."
             )
 
         body = b"".join(chunks)
@@ -691,7 +680,7 @@ class ESSRResponseWrapper:
         return headers
 
     @staticmethod
-    def _innerError(_context, status, message):
+    def _innerError(status, message):
         body = message.encode("utf-8")
         return (
             status,
@@ -706,7 +695,11 @@ class ESSRResponseWrapper:
     def _outerError(start_response, cors=()):
         start_response(
             falcon.HTTP_500,
-            [("content-length", "0"), *cors],
+            [
+                ("content-type", "text/plain; charset=utf-8"),
+                ("content-length", "0"),
+                *cors,
+            ],
         )
         return [b""]
 

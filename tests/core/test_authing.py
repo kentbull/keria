@@ -641,7 +641,6 @@ def test_build_environ_ipv6(url, expected_port, expected_host):
 def test_build_environ_inherits_wsgi_server_context():
     outer = testing.create_environ(remote_addr="192.0.2.10")
     outer["REMOTE_PORT"] = "54321"
-    outer["wsgi.server_name"] = "hio"
     wrapper = object()
     outer["wsgi.file_wrapper"] = wrapper
 
@@ -651,7 +650,6 @@ def test_build_environ_inherits_wsgi_server_context():
 
     assert environ["REMOTE_ADDR"] == "192.0.2.10"
     assert environ["REMOTE_PORT"] == "54321"
-    assert environ["wsgi.server_name"] == "hio"
     assert environ["wsgi.file_wrapper"] is wrapper
 
 
@@ -742,6 +740,8 @@ def test_build_environ_malformed():
         b"GET https://user@example.com/main HTTP/1.1\r\n\r\n",
         b"GET https://example.com/main#fragment HTTP/1.1\r\n\r\n",
         b"GET https://2001:db8::1/main HTTP/1.1\r\n\r\n",
+        b"GET https://example.com:/main HTTP/1.1\r\n\r\n",
+        b"GET https://[2001:db8::1]:/main HTTP/1.1\r\n\r\n",
         b"GET https://example.com/main HTTP/2\r\n\r\n",
         b"GET https://example.com/main HTTP/1.1\r\nHost: other.example\r\n\r\n",
         b"GET https://example.com/main HTTP/1.1\r\nX-Test: one\r\nX-Test: two\r\n\r\n",
@@ -819,6 +819,11 @@ class RecordingESSRAuthenticator:
         )
 
 
+class FailingESSRAuthenticator:
+    def wrapResponse(self, *_args, **_kwargs):
+        raise RuntimeError("cannot seal response")
+
+
 class ESSRContextMiddleware:
     def __init__(self, method="GET"):
         self.method = method
@@ -855,8 +860,8 @@ class CloseableStream:
         self.closed = True
 
 
-def wrapped_client(resource, method="GET"):
-    recorder = RecordingESSRAuthenticator()
+def wrapped_client(resource, method="GET", authn=None):
+    recorder = authn if authn is not None else RecordingESSRAuthenticator()
     app = falcon.App(
         middleware=[ESSRContextMiddleware(method)],
         request_type=authing.ModifiableRequest,
@@ -959,6 +964,8 @@ def test_essr_response_wrapper_rejects_unbounded_stream_without_iteration():
 @pytest.mark.parametrize(
     "length, chunks",
     [
+        ("0", [b"unexpected"]),
+        ("3", [b"abc", b"unexpected"]),
         ("4", [b"short"]),
         ("10", [b"short"]),
     ],
@@ -978,6 +985,21 @@ def test_essr_response_wrapper_rejects_stream_length_errors(length, chunks):
     assert stream.closed is True
 
 
+def test_essr_response_wrapper_reports_outer_failure():
+    class Resource:
+        def on_get(self, _req, resp):
+            resp.data = b"body"
+
+    with mock.patch.object(authing.logger, "exception") as log:
+        client, _ = wrapped_client(Resource(), authn=FailingESSRAuthenticator())
+        result = client.simulate_post("/")
+
+    assert result.status == falcon.HTTP_500
+    assert result.content == b""
+    assert result.headers["content-type"] == "text/plain; charset=utf-8"
+    log.assert_called_once_with("Failed to protect finalized ESSR response")
+
+
 def test_essr_response_wrapper_preserves_non_essr_streaming():
     stream = CloseableStream([b"streamed"])
 
@@ -986,12 +1008,14 @@ def test_essr_response_wrapper_preserves_non_essr_streaming():
             resp.set_header("Content-Length", "8")
             resp.stream = stream
 
+        on_post = on_get
+
     app = falcon.App()
-    app.add_route("/", Resource())
+    app.add_route("/direct", Resource())
     recorder = RecordingESSRAuthenticator()
     client = testing.TestClient(authing.ESSRResponseWrapper(app, recorder))
 
-    result = client.simulate_get("/")
+    result = client.simulate_post("/direct")
     assert result.content == b"streamed"
     assert recorder.calls == []
 
