@@ -53,7 +53,20 @@ The JSON file must have an object with the same name that you sent to the `keria
 The default is "keria" which is why the JSON file below shows a sub-object named "keria".
 Make sure to include the "dt" date timestamp field or the configuration will not be loaded.
 
-You can configure the cycle time, or tocks, of the escrower as well as the agent initializer.
+Scheduler Configuration
+-----------------------
+
+Configure KERIpy scheduler cadences directly under ``tocks`` and KERIA
+cadences under ``tocks.signify``. Values must be finite, non-negative numbers.
+Explicit ``0.0`` values are retained. Invalid or unknown settings stop Agency
+startup before any Agent is opened.
+
+Active message, queue, HTTP, and coordination paths default to ``0.0`` so they
+resume on the next scheduler cycle. The full Agent escrow scan defaults to one
+second and the idle-Agent release scan defaults to 60 seconds. The finite
+``GrantDoer`` inherits the configured ``granter`` cadence. KERIA's delegation
+Anchorer uses KERIpy's ``anchorerEscrow`` cadence, and the one-shot ``sig-fix``
+CLI is intentionally not process-configurable.
 
 You can also configure the CURLs, IURLs, and DURLs of the agent.
 CURLs are Service Endpoint Location URLs creating Endpoint Role Authorizations and Location Scheme records on startup.
@@ -74,10 +87,25 @@ DURLS are Data OOBI URLs resolved on startup usually of things like ACDC credent
         "http://127.0.0.1:5644/oobi/BIKKuvBwpmDVA4Ds-EpL5bt9OqPzWPja2LigFYZN2YfX/controller?name=Wes&tag=witness"
       ],
       "tocks": {
-        "initer": 0.0,
-        "escrower": 1.0
+        "witnessMsg": 0.0,
+        "signify": {
+          "initer": 0.0,
+          "escrower": 1.0
+        }
       }
     }
+
+KERIA settings have corresponding ``KERIA_*_TOCK`` environment variables:
+``agency``, ``agent``, ``gracefulShutdown``, ``bootServer``, ``adminServer``,
+``httpServer``, ``releaser``, ``initer``, ``querier``, ``escrower``, ``parser``,
+``witnesser``, ``delegator``, ``exchangeSender``, ``granter``, ``admitter``,
+``groupRequester``, ``seeker``, ``exchangecue``, and ``submitter``. For example,
+``KERIA_ESCROWER_TOCK=0.5`` overrides ``tocks.signify.escrower``.
+
+Flat KERIA keys directly under ``tocks`` remain accepted for migration from
+KERIA 0.4.1 and emit one warning per process. Nested ``tocks.signify`` values
+win when both forms are present. Resolved process settings are not copied into
+per-Agent configuration files.
 
 keria.app.aiding
 ----------------

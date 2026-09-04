@@ -391,6 +391,37 @@ wheels = [
 ]
 
 [[package]]
+name = "gleif-keri"
+version = "1.2.14"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "apispec" },
+    { name = "blake3" },
+    { name = "cbor2" },
+    { name = "cryptography" },
+    { name = "falcon" },
+    { name = "hio" },
+    { name = "hjson" },
+    { name = "http-sfv" },
+    { name = "jsonschema" },
+    { name = "lmdb" },
+    { name = "mnemonic" },
+    { name = "msgpack" },
+    { name = "multicommand" },
+    { name = "multidict" },
+    { name = "ordered-set" },
+    { name = "prettytable" },
+    { name = "pysodium" },
+    { name = "pyyaml" },
+    { name = "qrcode" },
+    { name = "semver" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/24/ac/8b92a13e54108813ab4bfe3ad9da7a874abb2c3b7c537f6fc004a651d7c3/gleif_keri-1.2.14.tar.gz", hash = "sha256:e4cc7b817e22265a004dd996a2d571de0114f31296101e26b2847634c54ed8dc", size = 495604, upload-time = "2026-09-04T12:46:58.903Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/2c/6814b0f18c2bd594c77ec06797564986368d3d85f2b44a2e2919d1a67e6a/gleif_keri-1.2.14-py3-none-any.whl", hash = "sha256:307ebf7297a4f74e297bec26316ad1f61181459203dca320c1be0cf4aa6a3720", size = 611481, upload-time = "2026-09-04T12:46:57.414Z" },
+]
+
+[[package]]
 name = "hio"
 version = "0.6.14"
 source = { registry = "https://pypi.org/simple" }
@@ -492,34 +523,6 @@ wheels = [
 ]
 
 [[package]]
-name = "keri"
-version = "1.2.13"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "apispec" },
-    { name = "blake3" },
-    { name = "cbor2" },
-    { name = "cryptography" },
-    { name = "falcon" },
-    { name = "hio" },
-    { name = "hjson" },
-    { name = "http-sfv" },
-    { name = "jsonschema" },
-    { name = "lmdb" },
-    { name = "mnemonic" },
-    { name = "msgpack" },
-    { name = "multicommand" },
-    { name = "multidict" },
-    { name = "ordered-set" },
-    { name = "prettytable" },
-    { name = "pysodium" },
-    { name = "pyyaml" },
-    { name = "qrcode" },
-    { name = "semver" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/29/0f/6a7fd0cbd681c31fad385e2a5f27ac9ea9e6f7aae6f30b5814f960acdf17/keri-1.2.13.tar.gz", hash = "sha256:aef033ec3b17d4b04d8801b5365b225b6cba5630a67aaad2f306aaecbd256fcd", size = 479577, upload-time = "2026-05-06T18:24:47.865Z" }
-
-[[package]]
 name = "keria"
 version = "0.4.1"
 source = { editable = "." }
@@ -528,9 +531,9 @@ dependencies = [
     { name = "dataclasses-json" },
     { name = "deprecation" },
     { name = "falcon" },
+    { name = "gleif-keri" },
     { name = "hio" },
     { name = "http-sfv" },
-    { name = "keri" },
     { name = "marshmallow-dataclass" },
     { name = "mnemonic" },
     { name = "multicommand" },
@@ -553,9 +556,9 @@ requires-dist = [
     { name = "dataclasses-json", specifier = "==0.6.7" },
     { name = "deprecation", specifier = "==2.1.0" },
     { name = "falcon", specifier = "==4.0.2" },
+    { name = "gleif-keri", specifier = "==1.2.14" },
     { name = "hio", specifier = "==0.6.14" },
     { name = "http-sfv", specifier = "==0.9.9" },
-    { name = "keri", specifier = ">=1.2.13,<1.3" },
     { name = "marshmallow-dataclass", specifier = "==8.7.1" },
     { name = "mnemonic", specifier = "==0.21" },
     { name = "multicommand", specifier = ">=1.0.0" },

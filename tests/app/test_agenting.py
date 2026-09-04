@@ -12,11 +12,11 @@ import os
 import shutil
 import signal
 import time
+import uuid
 from base64 import b64encode
 
 import falcon
 import hio
-import pytest
 import requests
 from falcon import testing
 from hio.base import doing, tyming
@@ -48,6 +48,7 @@ def test_setup_no_http():
     doers = agenting.setupDoers(agency, config)
     assert len(doers) == 3
     assert isinstance(doers[0], agenting.Agency) is True
+    assert [doer.tock for doer in doers] == [0.0, 0.0, 0.0]
 
 
 def test_setup():
@@ -60,6 +61,10 @@ def test_setup():
     agency = agenting.createAgency(config, temp=True, cf=None)
     doers = agenting.setupDoers(agency, config)
     assert len(doers) == 4
+    assert [doer.tock for doer in doers] == [0.0, 0.0, 0.0, 0.0]
+
+    doist = agenting.agencyDoist(doers)
+    assert doist.doers[-1].tock == agency.keriaTocks["gracefulShutdown"]
 
 
 def wait_for_server(port, timeout=10):
@@ -214,31 +219,39 @@ def test_load_tocks_config(helpers):
             "iurls": [
                 "http://127.0.0.1:5642/oobi/BBilc4-L3tFUnfM_wJr4S4OJanAv_VmF_dJNN6vkf2Ha/controller&tag=witness"
             ],
-            "tocks": {"initer": 0.0, "escrower": 1.0},
+            "tocks": {"signify": {"initer": 0.0, "escrower": 1.0}},
         }
 
-        assert agent.tocks == {"initer": 0.0, "escrower": 1.0}
+        assert agent.tocks["initer"] == 0.0
+        assert agent.tocks["escrower"] == 1.0
+        assert agent.tocks["querier"] == 0.0
+        assert agent.tocks is agency.keriaTocks
+        assert agent.hby.tocks == agency.keriTocks
+        assert agent.tock == agency.keriaTocks["agent"]
+        assert agency.tock == agency.keriaTocks["agency"]
+        assert agency.doers[0].tock == agency.keriaTocks["releaser"]
 
-        escrower_doer = next(
-            (doer for doer in agent.doers if isinstance(doer, agenting.Escrower)), None
-        )
-        assert escrower_doer is not None
-        assert escrower_doer.tock == 1.0
-
-        initer_doer = next(
-            (doer for doer in agent.doers if isinstance(doer, agenting.Initer)), None
-        )
-        assert initer_doer is not None
-        assert initer_doer.tock == 0.0
-
-        querier_doer = next(
-            (doer for doer in agent.doers if isinstance(doer, agenting.Querier)), None
-        )
-        assert querier_doer is not None
-        assert querier_doer.tock == 0.0
-
-        with pytest.raises(TypeError):
-            agent.tocks["initer"] = 1.0  # agent.tocks is read-only
+        expected = {
+            agenting.Initer: "initer",
+            agenting.Querier: "querier",
+            agenting.Escrower: "escrower",
+            agenting.ParserDoer: "parser",
+            agenting.Witnesser: "witnesser",
+            agenting.Delegator: "delegator",
+            agenting.ExchangeSender: "exchangeSender",
+            agenting.Granter: "granter",
+            agenting.Admitter: "admitter",
+            agenting.GroupRequester: "groupRequester",
+            agenting.SeekerDoer: "seeker",
+            agenting.ExchangeCueDoer: "exchangecue",
+            agenting.Submitter: "submitter",
+        }
+        configured = {
+            type(doer): doer for doer in agent.doers if type(doer) in expected
+        }
+        assert set(configured) == set(expected)
+        for klas, key in expected.items():
+            assert configured[klas].tock == agency.keriaTocks[key]
 
 
 def test_agency():
@@ -287,7 +300,7 @@ def test_agency():
         assert agent.pre == "ELu7SsaPCHNcyz-eqqPfOU6rOmhH7ayGkZJxvCy0Z1yC"
 
         # Create non-temp Agency and test reload of agent from disk
-        base = "keria-temp"
+        base = f"keria-temp-{uuid.uuid4().hex}"
 
         # Clean up afterwards
         if os.path.exists(f"/usr/local/var/keri/db/{base}"):

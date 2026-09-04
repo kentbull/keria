@@ -26,6 +26,7 @@ def test_sealer():
     with habbing.openHby(name="p1", temp=True) as hby:
         # Create Anchorer to test
         anchorer = delegating.Anchorer(hby=hby)
+        assert anchorer.doers[-1].tock == hby.tocks["anchorerEscrow"]
 
         # Doer hierarchy
         doist = doing.Doist(tock=0.03125, real=True)

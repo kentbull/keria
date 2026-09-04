@@ -59,7 +59,12 @@ class Anchorer(doing.DoDoer):
         self.proxy = proxy
 
         super(Anchorer, self).__init__(
-            doers=[self.witq, self.witDoer, self.postman, doing.doify(self.escrowDo)],
+            doers=[
+                self.witq,
+                self.witDoer,
+                self.postman,
+                doing.doify(self.escrowDo, tock=hby.tocks["anchorerEscrow"]),
+            ],
             **kwa,
         )
 
@@ -135,7 +140,7 @@ class Anchorer(doing.DoDoer):
 
         while True:
             self.processEscrows()
-            yield 0.5
+            yield tock
 
     def processEscrows(self):
         self.processPartialWitnessEscrow()
