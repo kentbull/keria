@@ -56,10 +56,12 @@ def test_setup():
         adminPort=1234,
         bootPort=5678,
         httpPort=9999,
+        serverTimeout=42.0,
     )
     agency = agenting.createAgency(config, temp=True, cf=None)
     doers = agenting.setupDoers(agency, config)
     assert len(doers) == 4
+    assert all(doer.server.servant.tymeout == 42.0 for doer in doers[1:])
 
 
 def wait_for_server(port, timeout=10):
@@ -939,7 +941,8 @@ def test_query_ends(helpers):
 
 
 class MockServerTls:
-    def __init__(self, certify, keypath, certpath, cafilepath, port):
+    def __init__(self, certify, keypath, certpath, cafilepath, port, tymeout):
+        self.tymeout = tymeout
         pass
 
 
@@ -963,6 +966,7 @@ def test_createHttpServer(monkeypatch):
 
     assert isinstance(server, MockHttpServer)
     assert isinstance(server.servant, MockServerTls)
+    assert server.servant.tymeout == httping.DEFAULT_SERVER_TYMEOUT
 
 
 def test_seeker_doer(helpers):

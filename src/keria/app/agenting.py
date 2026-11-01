@@ -124,6 +124,8 @@ class KERIAServerConfig:
     certPath: str = None
     # TLS server CA certificate chain
     caFilePath: str = None
+    # HTTP/TLS server connection timeout in seconds.
+    serverTimeout: float = httping.DEFAULT_SERVER_TYMEOUT
 
     # Logging configuration
     # Set log level to DEBUG | INFO | WARNING | ERROR | CRITICAL.
@@ -930,7 +932,12 @@ def createBootServerDoer(config: KERIAServerConfig, agency: Agency):
     bootApp.add_route("/health", HealthEnd())
 
     bootServer = createHttpServer(
-        config.bootPort, bootApp, config.keyPath, config.certPath, config.caFilePath
+        config.bootPort,
+        bootApp,
+        config.keyPath,
+        config.certPath,
+        config.caFilePath,
+        tymeout=config.serverTimeout,
     )
     if not bootServer.reopen():
         raise RuntimeError(f"Cannot create boot HTTP server on port {config.bootPort}")
@@ -965,7 +972,12 @@ def createAdminServerDoer(config: KERIAServerConfig, agency: Agency):
     ipexing.loadEnds(app=adminApp)
 
     adminServer = createHttpServer(
-        config.adminPort, adminApp, config.keyPath, config.certPath, config.caFilePath
+        config.adminPort,
+        adminApp,
+        config.keyPath,
+        config.certPath,
+        config.caFilePath,
+        tymeout=config.serverTimeout,
     )
     if not adminServer.reopen():
         raise RuntimeError(
@@ -994,7 +1006,12 @@ def createHttpServerDoer(
     specEnd.addRoutes(happ)
     happ.add_route("/spec.yaml", specEnd)
     server = createHttpServer(
-        config.httpPort, happ, config.keyPath, config.certPath, config.caFilePath
+        config.httpPort,
+        happ,
+        config.keyPath,
+        config.certPath,
+        config.caFilePath,
+        tymeout=config.serverTimeout,
     )
     if not server.reopen():
         raise RuntimeError(f"cannot create local http server on port {config.httpPort}")

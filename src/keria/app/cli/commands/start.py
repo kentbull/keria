@@ -105,6 +105,13 @@ parser.add_argument(
     help="TLS server CA certificate chain",
 )
 parser.add_argument(
+    "--server-timeout",
+    dest="serverTimeout",
+    type=float,
+    default=float(os.getenv("KERIA_SERVER_TIMEOUT", "30")),
+    help="HTTP/TLS server connection timeout in seconds. Default is 30.",
+)
+parser.add_argument(
     "--loglevel",
     action="store",
     required=False,
@@ -150,6 +157,7 @@ def launch(args):
             keyPath=args.keypath,
             certPath=args.certpath,
             caFilePath=args.cafilepath,
+            serverTimeout=args.serverTimeout,
             logLevel=args.loglevel,
             logFile=args.logfile,
             logRequests=args.logrequests if args.logrequests else False,

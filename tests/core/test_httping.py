@@ -1,8 +1,38 @@
 import unittest
+import ssl
+
+from hio.core import tcp
 from falcon import falcon
 from falcon.testing import helpers
 from falcon.http_status import HTTPStatus
+from keria.core import httping
 from keria.core.httping import HandleCORS
+
+
+def test_create_http_server_sets_timeout_on_tls_servant(monkeypatch):
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    monkeypatch.setattr(tcp.serving, "initServerContext", lambda **kwa: context)
+    app = falcon.App()
+
+    server = httping.createHttpServer(
+        3901,
+        app,
+        keypath="keypath",
+        certpath="certpath",
+        cafilepath="cafilepath",
+    )
+    assert isinstance(server.servant, tcp.ServerTls)
+    assert server.servant.tymeout == 30.0
+
+    server = httping.createHttpServer(
+        3901,
+        app,
+        keypath="keypath",
+        certpath="certpath",
+        cafilepath="cafilepath",
+        tymeout=45.0,
+    )
+    assert server.servant.tymeout == 45.0
 
 
 class HandleCORSTest(unittest.TestCase):

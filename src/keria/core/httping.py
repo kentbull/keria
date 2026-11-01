@@ -16,6 +16,8 @@ from keria import ogler, log_name
 
 logger = ogler.getLogger(log_name)
 
+DEFAULT_SERVER_TYMEOUT = 30.0
+
 
 class HandleCORS(object):
     def process_request(self, req, resp):
@@ -125,7 +127,14 @@ def falconApp(logRequests=False, request_type=falcon.Request):
     return falcon.App(middleware=middlewares, request_type=request_type)
 
 
-def createHttpServer(port, app, keypath=None, certpath=None, cafilepath=None):
+def createHttpServer(
+    port,
+    app,
+    keypath=None,
+    certpath=None,
+    cafilepath=None,
+    tymeout=DEFAULT_SERVER_TYMEOUT,
+):
     """
     Create an HTTP or HTTPS server depending on whether TLS key material is present
 
@@ -135,6 +144,7 @@ def createHttpServer(port, app, keypath=None, certpath=None, cafilepath=None):
         keypath (string)   : the file path to the TLS private key
         certpath (string)  : the file path to the TLS signed certificate (public key)
         cafilepath (string): the file path to the TLS CA certificate chain file
+        tymeout (float)    : server connection timeout in seconds
     Returns:
         hio.core.http.Server
     """
@@ -145,8 +155,9 @@ def createHttpServer(port, app, keypath=None, certpath=None, cafilepath=None):
             certpath=certpath,
             cafilepath=cafilepath,
             port=port,
+            tymeout=tymeout,
         )
         server = http.Server(port=port, app=app, servant=servant)
     else:
-        server = http.Server(port=port, app=app)
+        server = http.Server(port=port, app=app, tymeout=tymeout)
     return server
