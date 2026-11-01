@@ -23,7 +23,7 @@ from hio.base import doing, Doer
 from hio.core import http
 from hio.help import decking
 
-from keri import core, kering
+from keri import core, kering, syncing
 from keri.app.notifying import Notifier
 from keri.app.storing import Mailboxer
 
@@ -60,6 +60,7 @@ from keria.utils.openapi import dataclassFromFielddom
 
 from . import aiding, notifying, indirecting, credentialing, ipexing, delegating
 from . import grouping as keriagrouping
+from . import syncing as keriasyncing
 from .serving import GracefulShutdownDoer
 from .. import log_name, ogler, set_log_level
 from ..core.httping import falconApp, createHttpServer
@@ -725,6 +726,11 @@ class Agent(doing.DoDoer):
         handlers = [challengeHandler]
         self.exc = exchanging.Exchanger(hby=hby, handlers=handlers)
         grouping.loadHandlers(exc=self.exc, mux=self.mux)
+        self.syncs = decking.Deck()
+        self.syncHandler = keriasyncing.SignifyMultisigAddHandler(
+            agent=self, msgs=self.syncs
+        )
+        self.exc.addHandler(self.syncHandler)
         protocoling.loadHandlers(hby=self.hby, exc=self.exc, notifier=self.notifier)
         self.submitter = Submitter(
             hby=hby, submits=self.submits, witRec=self.witSubmitDoer
@@ -760,6 +766,16 @@ class Agent(doing.DoDoer):
             vry=self.verifier,
             local=True,
         )  # disable misfit escrow until we can add another parser for remote.
+        processor, converger = syncing.bind_delivery(
+            hby=self.hby, reger=self.rgy.reger
+        )
+        self.syncer = syncing.SyncDoer(
+            msgs=self.syncs,
+            processor=processor,
+            converger=converger,
+            tock=self.tocks.get("syncer", 0.0),
+        )
+        self.monitor.syncer = self.syncer
 
         doers.extend(
             [
@@ -840,6 +856,7 @@ class Agent(doing.DoDoer):
                     queries=self.queries,
                     tock=self.tocks.get("exchangecue", 0.0),
                 ),
+                self.syncer,
                 self.submitter,
             ]
         )
@@ -960,6 +977,7 @@ def createAdminServerDoer(config: KERIAServerConfig, agency: Agency):
     delegating.loadEnds(app=adminApp, identifierResource=aidEnd)
     notifying.loadEnds(app=adminApp)
     keriagrouping.loadEnds(app=adminApp)
+    keriasyncing.loadEnds(app=adminApp)
 
     keriaexchanging.loadEnds(app=adminApp)
     ipexing.loadEnds(app=adminApp)
