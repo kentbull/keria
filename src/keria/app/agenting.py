@@ -521,6 +521,28 @@ class Agency(doing.DoDoer):
             raise KeyboardInterrupt("Agency shutdown complete. Exiting Agency.")
 
 
+class SignifyExchanger(exchanging.Exchanger):
+    """Elect one Signify multisig member to send an exchange message."""
+
+    def lead(self, hab, said):
+        """Apply group sender election to KERIA's Signify group habitat."""
+        if not isinstance(hab, habbing.SignifyGroupHab):
+            return super().lead(hab, said)
+
+        signing_keys = [verfer.qb64 for verfer in hab.kever.verfers]
+        signature_groups = eventing.fetchTsgs(
+            self.hby.db.esigs,
+            coring.Saider(qb64=said),
+        )
+        if not signature_groups:
+            return False
+
+        _, _, _, signatures = signature_groups[0]
+        elected_index = min(signature.index for signature in signatures)
+        member_key = hab.mhab.kever.verfers[0].qb64
+        return member_key == signing_keys[elected_index]
+
+
 class Agent(doing.DoDoer):
     """
     An network accessible agent paired to a remote Signify controller holding keys at the edge.
@@ -722,7 +744,7 @@ class Agent(doing.DoDoer):
         challengeHandler = challenging.ChallengeHandler(db=hby.db, signaler=signaler)
 
         handlers = [challengeHandler]
-        self.exc = exchanging.Exchanger(hby=hby, handlers=handlers)
+        self.exc = SignifyExchanger(hby=hby, handlers=handlers)
         grouping.loadHandlers(exc=self.exc, mux=self.mux)
         protocoling.loadHandlers(hby=self.hby, exc=self.exc, notifier=self.notifier)
         self.submitter = Submitter(
@@ -1270,6 +1292,22 @@ class GrantDoer(doing.Doer):
             chain_artifacts.append((source, atc))
         return chain_artifacts
 
+    @staticmethod
+    def deduplicateArtifacts(artifacts):
+        """Keep the first occurrence of each exact serialized artifact frame."""
+        seen = set()
+        unique = []
+
+        for serder, attachment in artifacts:
+            frame = bytes(serder.raw) + bytes(attachment)
+            if frame in seen:
+                continue
+
+            seen.add(frame)
+            unique.append((serder, attachment))
+
+        return unique
+
     def postGrant(self):
         """
         Presents an ACDC by sending all relevant data and cryptographic artifacts in the following order:
@@ -1301,8 +1339,16 @@ class GrantDoer(doing.Doer):
                     credSaid = serder.ked["e"]["acdc"]["d"]
                     cred_artifacts = self.getCredArtifacts(recp, credSaid)
                     artifacts = agent_evts + cred_artifacts
+                    unique_artifacts = self.deduplicateArtifacts(artifacts)
+                    logger.info(
+                        "Grant %s to %s queued %d of %d artifact frames",
+                        said,
+                        recp,
+                        len(unique_artifacts),
+                        len(artifacts),
+                    )
                     # Queue the artifacts for later sending by postman.deliver()
-                    for serder, atc in artifacts:
+                    for serder, atc in unique_artifacts:
                         postman.send(serder=serder, attachment=atc)
                 except kering.ValidationError:
                     logger.info(f"unable to send to recipient={recp}")

@@ -13,6 +13,8 @@ import shutil
 import signal
 import time
 from base64 import b64encode
+from types import SimpleNamespace
+from unittest import mock
 
 import falcon
 import hio
@@ -35,6 +37,61 @@ from keri.vdr import credentialing
 from keria.app import agenting, aiding
 from keria.core import longrunning, httping
 from keria.testing.testing_helper import SCRIPTS_DIR
+
+
+def test_signify_exchanger_elects_one_multisig_sender():
+    """Signify groups use the same lowest-signature-index rule as KLI groups."""
+
+    class FakeSignifyGroupHab:
+        pass
+
+    signing_keys = [
+        SimpleNamespace(qb64="key-0"),
+        SimpleNamespace(qb64="key-1"),
+        SimpleNamespace(qb64="key-2"),
+    ]
+    hab = FakeSignifyGroupHab()
+    hab.kever = SimpleNamespace(verfers=signing_keys)
+    hab.mhab = SimpleNamespace(
+        kever=SimpleNamespace(verfers=[SimpleNamespace(qb64="key-1")])
+    )
+
+    exchanger = object.__new__(agenting.SignifyExchanger)
+    exchanger.hby = SimpleNamespace(db=SimpleNamespace(esigs=object()))
+    signatures = [SimpleNamespace(index=2), SimpleNamespace(index=1)]
+
+    with (
+        mock.patch.object(agenting.habbing, "SignifyGroupHab", FakeSignifyGroupHab),
+        mock.patch.object(
+            agenting.eventing,
+            "fetchTsgs",
+            return_value=[(None, None, None, signatures)],
+        ),
+    ):
+        assert exchanger.lead(hab, "E" + "A" * 43) is True
+
+        hab.mhab.kever.verfers[0].qb64 = "key-2"
+        assert exchanger.lead(hab, "E" + "A" * 43) is False
+
+        with mock.patch.object(agenting.eventing, "fetchTsgs", return_value=[]):
+            assert exchanger.lead(hab, "E" + "A" * 43) is False
+
+    assert exchanger.lead(object(), "not-used") is True
+
+
+def test_grant_artifact_deduplication_preserves_protocol_order():
+    """Only byte-identical frames are removed from one assembled grant stream."""
+
+    artifact_a = (SimpleNamespace(raw=b"A"), bytearray(b"-attachment"))
+    duplicate_a = (SimpleNamespace(raw=b"A"), bytearray(b"-attachment"))
+    new_attachment_a = (SimpleNamespace(raw=b"A"), bytearray(b"-other"))
+    artifact_b = (SimpleNamespace(raw=b"B"), bytearray(b"-attachment"))
+
+    unique = agenting.GrantDoer.deduplicateArtifacts(
+        [artifact_a, duplicate_a, new_attachment_a, artifact_b]
+    )
+
+    assert unique == [artifact_a, new_attachment_a, artifact_b]
 
 
 def test_setup_no_http():
