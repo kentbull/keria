@@ -18,13 +18,14 @@ from keri import core
 from keri.app import habbing, signing
 from keri.core import eventing, coring, serdering
 from keri.core.signing import Salter
+from keri.db import dbing
 from keri.help import helping
 from keri.kering import Roles, TraitCodex
 from keri.peer import exchanging
 from keri.vc import proving
 from keri.vdr import eventing as veventing
 
-from keria.app import ipexing, aiding, agenting, credentialing
+from keria.app import ipexing, aiding, agenting, credentialing, delegating
 from keria.app.credentialing import CredentialResourceEnd
 from keria.core import longrunning
 
@@ -220,16 +221,79 @@ def test_gather_artifacts_skips_issuee_kel_when_recipient_is_issuee(helpers):
         assert [serder.pre for serder, _ in artifacts] == [issuerHab.pre]
 
 
+def create_managed_aid(helpers, agent, client, name, salt, delpre=None):
+    helpers.createAid(client, name, salt, delpre=delpre)
+    hab = agent.hby.habByName(name)
+    assert isinstance(hab, habbing.SignifyHab)
+    return hab
+
+
+def approve_managed_delegation(
+    helpers, agent, client, delegator, delegate, delegator_salt
+):
+    agent.swain.delegation(pre=delegate.pre, proxy=agent.agentHab)
+    agent.swain.processPartialWitnessEscrow()
+
+    seal = eventing.SealEvent(i=delegate.pre, s="0", d=delegate.pre)
+    serder, sigs = helpers.interact(
+        pre=delegator.pre,
+        bran=delegator_salt,
+        pidx=0,
+        ridx=0,
+        dig=delegator.kever.serder.said,
+        sn="1",
+        data=[seal._asdict()],
+    )
+    body = dict(ixn=serder.ked, sigs=sigs)
+    res = client.simulate_post(
+        path=f"/identifiers/{delegator.name}/delegation", body=json.dumps(body)
+    )
+
+    assert res.status_code == 200
+    assert res.json["done"] is True
+    assert res.json["response"] == delegate.pre
+
+    agent.swain.processUnanchoredEscrow()
+    dgkey = dbing.dgKey(delegate.pre, delegate.kever.serder.said)
+    assert agent.hby.db.getAes(dgkey) is not None
+
+
 def test_gather_artifacts_includes_issuee_delegation_chain_for_distinct_recipient(
     helpers,
 ):
-    with helpers.openKeria() as (_, agent, _, _):
-        issuer = agent.hby.makeHab(name="issuer")
-        disclosee = agent.hby.makeHab(name="disclosee")
+    with helpers.openKeria() as (_, agent, app, client):
+        app.add_route("/identifiers", aiding.IdentifierCollectionEnd())
+        identifier_resource = aiding.IdentifierResourceEnd()
+        app.add_route("/identifiers/{name}", identifier_resource)
+        delegating.loadEnds(app, identifier_resource)
+
+        issuer = create_managed_aid(
+            helpers, agent, client, "issuer", b"0123456789abcdef"
+        )
+        delegator_salt = b"0123456789abcdeg"
+        delegator = create_managed_aid(
+            helpers, agent, client, "delegator", delegator_salt
+        )
+        issuee = create_managed_aid(
+            helpers,
+            agent,
+            client,
+            "issuee",
+            b"0123456789abcdeh",
+            delpre=delegator.pre,
+        )
+        disclosee = create_managed_aid(
+            helpers, agent, client, "disclosee", b"0123456789abcdei"
+        )
+        assert issuee.kever.delpre == delegator.pre
+        approve_managed_delegation(
+            helpers, agent, client, delegator, issuee, delegator_salt
+        )
+
         creder = proving.credential(
             issuer=issuer.pre,
             schema="EFgnk_c08WmZGgv9_mpldibRuqFMTQN-rAgtD-TCOwbs",
-            recipient=agent.agentHab.pre,
+            recipient=issuee.pre,
             data={"claim": "An issuer-authored observation"},
             source={},
             rules={},
@@ -241,18 +305,43 @@ def test_gather_artifacts_includes_issuee_delegation_chain_for_distinct_recipien
 
         assert [serder.pre for serder, _ in artifacts] == [
             issuer.pre,
-            agent.caid,
-            agent.agentHab.pre,
+            delegator.pre,
+            delegator.pre,
+            issuee.pre,
         ]
 
 
 def test_gather_artifacts_includes_issuer_delegation_chain_for_delegated_issuer(
     helpers,
 ):
-    with helpers.openKeria() as (_, agent, _, _):
-        disclosee = agent.hby.makeHab(name="disclosee")
+    with helpers.openKeria() as (_, agent, app, client):
+        app.add_route("/identifiers", aiding.IdentifierCollectionEnd())
+        identifier_resource = aiding.IdentifierResourceEnd()
+        app.add_route("/identifiers/{name}", identifier_resource)
+        delegating.loadEnds(app, identifier_resource)
+
+        delegator_salt = b"0123456789abcdef"
+        delegator = create_managed_aid(
+            helpers, agent, client, "delegator", delegator_salt
+        )
+        issuer = create_managed_aid(
+            helpers,
+            agent,
+            client,
+            "issuer",
+            b"0123456789abcdeg",
+            delpre=delegator.pre,
+        )
+        disclosee = create_managed_aid(
+            helpers, agent, client, "disclosee", b"0123456789abcdeh"
+        )
+        assert issuer.kever.delpre == delegator.pre
+        approve_managed_delegation(
+            helpers, agent, client, delegator, issuer, delegator_salt
+        )
+
         creder = proving.credential(
-            issuer=agent.agentHab.pre,
+            issuer=issuer.pre,
             schema="EFgnk_c08WmZGgv9_mpldibRuqFMTQN-rAgtD-TCOwbs",
             recipient=None,
             data={"claim": "An issuer-authored observation"},
@@ -265,8 +354,9 @@ def test_gather_artifacts_includes_issuer_delegation_chain_for_delegated_issuer(
         )
 
         assert [serder.pre for serder, _ in artifacts] == [
-            agent.caid,
-            agent.agentHab.pre,
+            delegator.pre,
+            delegator.pre,
+            issuer.pre,
         ]
 
 
