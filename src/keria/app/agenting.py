@@ -279,7 +279,7 @@ class Agency(doing.DoDoer):
             else basing.AgencyBaser(name="TheAgency", base=base, reopen=True, temp=temp)
         )
         super(Agency, self).__init__(
-            doers=[Releaser(self, releaseTimeout=releaseTimeout)]
+            doers=[Releaser(self, releaseTimeout=releaseTimeout)], temp=temp
         )
 
     def _loadConfigForAgent(self, caid):
@@ -317,6 +317,9 @@ class Agency(doing.DoDoer):
 
         if self.durls is not None and isinstance(self.durls, list):
             config["durls"] = config["durls"] + self.durls
+
+        # KERIA scheduler keys are not part of KERIpy's tock configuration.
+        config.pop("tocks", None)
         return config
 
     def _writeAgentConfig(self, caid):

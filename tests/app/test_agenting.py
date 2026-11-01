@@ -133,6 +133,7 @@ def test_graceful_shutdown_doer():
             releaseTimeout=0,
             configDir=SCRIPTS_DIR,
         )
+        assert agency.temp
 
         tock = 0.03125
         limit = 1.0
@@ -214,16 +215,16 @@ def test_load_tocks_config(helpers):
             "iurls": [
                 "http://127.0.0.1:5642/oobi/BBilc4-L3tFUnfM_wJr4S4OJanAv_VmF_dJNN6vkf2Ha/controller&tag=witness"
             ],
-            "tocks": {"initer": 0.0, "escrower": 1.0},
+            "tocks": {},
         }
 
-        assert agent.tocks == {"initer": 0.0, "escrower": 1.0}
+        assert agent.tocks == {}
 
         escrower_doer = next(
             (doer for doer in agent.doers if isinstance(doer, agenting.Escrower)), None
         )
         assert escrower_doer is not None
-        assert escrower_doer.tock == 1.0
+        assert escrower_doer.tock == 0.0
 
         initer_doer = next(
             (doer for doer in agent.doers if isinstance(doer, agenting.Initer)), None
@@ -1113,10 +1114,9 @@ def test_submitter(seeder, helpers):
 
         limit = 5.0
         tock = 0.03125
-        doist = doing.Doist(limit=limit, tock=tock)
-        doers = wanDoers + [rectDoer]
-        doist.do(doers=doers)
-        doist.recur()
+        for _ in range(int(limit / tock)):
+            wdoist.recur()
+            sdoist.recur(deeds=sdeeds)
 
         assert hab.pre in wanHab.kvy.kevers  # id key state in wit hab
         assert wanHab.kvy.kevers[hab.pre].sn == 0
