@@ -59,7 +59,7 @@ from keri.app import challenging
 
 from keria.utils.openapi import dataclassFromFielddom
 
-from . import aiding, notifying, indirecting, credentialing, ipexing, delegating
+from . import aiding, notifying, indirecting, credentialing, ipexing, delegating, tocking
 from . import grouping as keriagrouping
 from .serving import GracefulShutdownDoer
 from .. import log_name, ogler, set_log_level
@@ -271,6 +271,11 @@ class Agency(doing.DoDoer):
         else:
             self.cf = cf
 
+        configuration = self.cf.get() if self.cf is not None else {}
+        resolvedTocks = tocking.resolveTocks(configuration)
+        self.keriTocks = resolvedTocks.keri
+        self.signifyTocks = resolvedTocks.signify
+
         self.agents = dict()
 
         self.adb = (
@@ -295,6 +300,7 @@ class Agency(doing.DoDoer):
         """
         timestamp = nowIso8601()
         config = dict(self.cf.get() if self.cf is not None else {"dt": timestamp})
+        config.pop("tocks", None)
 
         # Renames sub-section of config
         habName = f"agent-{caid}"
@@ -363,6 +369,7 @@ class Agency(doing.DoDoer):
             cf=agent_cf,
             temp=self.temp,
             salt=salt,
+            tocks=self.keriTocks,
         )
         agentHab = agentHby.makeHab(habName, ns="agent", transferable=True, delpre=caid)
         agentRgy = Regery(
@@ -370,7 +377,12 @@ class Agency(doing.DoDoer):
         )
 
         agent = Agent(
-            hby=agentHby, rgy=agentRgy, agentHab=agentHab, caid=caid, agency=self
+            hby=agentHby,
+            rgy=agentRgy,
+            agentHab=agentHab,
+            caid=caid,
+            agency=self,
+            tocks=self.signifyTocks,
         )
 
         self.adb.agnt.pin(keys=(caid,), val=coring.Prefixer(qb64=agent.pre))
@@ -442,7 +454,12 @@ class Agency(doing.DoDoer):
         ks = keeping.Keeper(name=caid, base=self.base, temp=self.temp, reopen=True)
 
         agentHby = habbing.Habery(
-            name=caid, base=self.base, bran=self.bran, ks=ks, temp=self.temp
+            name=caid,
+            base=self.base,
+            bran=self.bran,
+            ks=ks,
+            temp=self.temp,
+            tocks=self.keriTocks,
         )
 
         agentHab = agentHby.habByName(f"agent-{caid}", ns="agent")
@@ -455,7 +472,12 @@ class Agency(doing.DoDoer):
             hby=agentHby, name=agentHab.name, base=self.base, temp=self.temp
         )
         agent = Agent(
-            hby=agentHby, rgy=agentRgy, agentHab=agentHab, agency=self, caid=caid
+            hby=agentHby,
+            rgy=agentRgy,
+            agentHab=agentHab,
+            agency=self,
+            caid=caid,
+            tocks=self.signifyTocks,
         )
 
         self.agents[caid] = agent
@@ -539,7 +561,7 @@ class Agent(doing.DoDoer):
       hierarchical deterministic key (HDK) management scheme used to select keys at the edge.
     """
 
-    def __init__(self, hby, rgy, agentHab, agency, caid, **opts):
+    def __init__(self, hby, rgy, agentHab, agency, caid, tocks=None, **opts):
         """
         Initialize the Agent with the given Habery, Regery, and agent's Hab.
         Parameters:
@@ -557,7 +579,7 @@ class Agent(doing.DoDoer):
             .agentHab (Hab): The Hab instance representing the agent itself.
             .rgy (Regery): The Regery instance for the agent's registry access.
             .cfd (MappingProxyType): Configuration data for the agent.
-            .tocks (MappingProxyType): Escrow timing configurations for the underlying Hio tasks comprising this agent.
+            .tocks (dict): Scheduler timing configuration for this agent.
             .last (datetime.datetime): Last activity timestamp for the agent.
             .shouldShutdown (bool): Flag indicating if the agent should shut down.
             .swain (delegating.Anchorer): Watches the delegator for delegation approval seals for inception and rotation.
@@ -640,7 +662,11 @@ class Agent(doing.DoDoer):
         self.cfd = MappingProxyType(
             dict(self.hby.cf.get()) if self.hby.cf is not None else dict()
         )
-        self.tocks = MappingProxyType(self.cfd.get("tocks", {}))
+        if tocks is None:
+            configuration = dict(self.cfd)
+            self.tocks = tocking.resolveTocks(configuration, environ={}).signify
+        else:
+            self.tocks = tocks
         self.last = helping.nowUTC()
         self._shouldShutdown = False
 
@@ -766,14 +792,14 @@ class Agent(doing.DoDoer):
         doers.extend(
             [
                 Initer(
-                    agentHab=agentHab, caid=caid, tock=self.tocks.get("initer", 0.0)
+                    agentHab=agentHab, caid=caid, tock=self.tocks["initer"]
                 ),
                 Querier(
                     hby=hby,
                     agentHab=agentHab,
                     kvy=self.kvy,
                     queries=self.queries,
-                    tock=self.tocks.get("querier", 0.0),
+                    tock=self.tocks["querier"],
                 ),
                 Escrower(
                     kvy=self.kvy,
@@ -784,28 +810,28 @@ class Agent(doing.DoDoer):
                     vry=self.verifier,
                     registrar=self.registrar,
                     credentialer=self.credentialer,
-                    tock=self.tocks.get("escrower", 0.0),
+                    tock=self.tocks["escrower"],
                 ),
                 ParserDoer(
-                    kvy=self.kvy, parser=self.parser, tock=self.tocks.get("parser", 0.0)
+                    kvy=self.kvy, parser=self.parser, tock=self.tocks["parser"]
                 ),
                 Witnesser(
                     receiptor=receiptor,
                     witners=self.witners,
-                    tock=self.tocks.get("witnesser", 0.0),
+                    tock=self.tocks["witnesser"],
                 ),
                 Delegator(
                     agentHab=agentHab,
                     swain=self.swain,
                     anchors=self.anchors,
-                    tock=self.tocks.get("delegator", 0.0),
+                    tock=self.tocks["delegator"],
                 ),
                 ExchangeSender(
                     hby=hby,
                     agentHab=agentHab,
                     exc=self.exc,
                     exchanges=self.exchanges,
-                    tock=self.tocks.get("exchangeSender", 0.0),
+                    tock=self.tocks["exchangeSender"],
                 ),
                 Granter(
                     hby=hby,
@@ -813,7 +839,7 @@ class Agent(doing.DoDoer):
                     agentHab=agentHab,
                     exc=self.exc,
                     grants=self.grants,
-                    tock=self.tocks.get("granter", 0.0),
+                    tock=self.tocks["granter"],
                 ),
                 Admitter(
                     hby=hby,
@@ -822,25 +848,25 @@ class Agent(doing.DoDoer):
                     agentHab=agentHab,
                     exc=self.exc,
                     admits=self.admits,
-                    tock=self.tocks.get("admitter", 0.0),
+                    tock=self.tocks["admitter"],
                 ),
                 GroupRequester(
                     hby=hby,
                     agentHab=agentHab,
                     counselor=self.counselor,
                     groups=self.groups,
-                    tock=self.tocks.get("groupRequester", 0.0),
+                    tock=self.tocks["groupRequester"],
                 ),
                 SeekerDoer(
                     seeker=self.seeker,
                     cues=self.verifier.cues,
-                    tock=self.tocks.get("seeker", 0.0),
+                    tock=self.tocks["seeker"],
                 ),
                 ExchangeCueDoer(
                     seeker=self.exnseeker,
                     cues=self.exc.cues,
                     queries=self.queries,
-                    tock=self.tocks.get("exchangecue", 0.0),
+                    tock=self.tocks["exchangecue"],
                 ),
                 self.submitter,
             ]

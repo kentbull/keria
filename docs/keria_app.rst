@@ -53,7 +53,11 @@ The JSON file must have an object with the same name that you sent to the `keria
 The default is "keria" which is why the JSON file below shows a sub-object named "keria".
 Make sure to include the "dt" date timestamp field or the configuration will not be loaded.
 
-You can configure the cycle time, or tocks, of the escrower as well as the agent initializer.
+You can configure KERIpy scheduler cycle times directly under ``tocks`` and
+Signify-architecture scheduler cycle times under ``tocks.signify``. Values must
+be finite, non-negative JSON/HJSON numbers. Explicit ``0.0`` and values below
+``1/32`` are valid. Invalid or unknown settings stop Agency startup before any
+Agent is opened.
 
 You can also configure the CURLs, IURLs, and DURLs of the agent.
 CURLs are Service Endpoint Location URLs creating Endpoint Role Authorizations and Location Scheme records on startup.
@@ -74,10 +78,26 @@ DURLS are Data OOBI URLs resolved on startup usually of things like ACDC credent
         "http://127.0.0.1:5644/oobi/BIKKuvBwpmDVA4Ds-EpL5bt9OqPzWPja2LigFYZN2YfX/controller?name=Wes&tag=witness"
       ],
       "tocks": {
-        "initer": 0.0,
-        "escrower": 1.0
+        "witnessMsg": 0.0,
+        "signify": {
+          "initer": 0.0,
+          "escrower": 1.0
+        }
       }
     }
+
+Environment variables override configuration-file values. Signify settings use
+``KERIA_INITER_TOCK``, ``KERIA_QUERIER_TOCK``, ``KERIA_ESCROWER_TOCK``,
+``KERIA_PARSER_TOCK``, ``KERIA_WITNESSER_TOCK``, ``KERIA_DELEGATOR_TOCK``,
+``KERIA_EXCHANGE_SENDER_TOCK``, ``KERIA_GRANTER_TOCK``,
+``KERIA_ADMITTER_TOCK``, ``KERIA_GROUP_REQUESTER_TOCK``,
+``KERIA_SEEKER_TOCK``, and ``KERIA_EXCHANGE_CUE_TOCK``. The configuration key
+for the last variable retains its released spelling, ``exchangecue``.
+
+Flat Signify keys directly under ``tocks`` remain accepted for one migration
+release and emit one warning per process. Nested ``tocks.signify`` values win
+when both forms are present. Process-level tocks are resolved once by the
+Agency; they are not copied into per-Agent configuration files.
 
 keria.app.aiding
 ----------------

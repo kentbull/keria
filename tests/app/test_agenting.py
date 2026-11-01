@@ -12,6 +12,7 @@ import os
 import shutil
 import signal
 import time
+import uuid
 from base64 import b64encode
 
 import falcon
@@ -214,10 +215,14 @@ def test_load_tocks_config(helpers):
             "iurls": [
                 "http://127.0.0.1:5642/oobi/BBilc4-L3tFUnfM_wJr4S4OJanAv_VmF_dJNN6vkf2Ha/controller&tag=witness"
             ],
-            "tocks": {"initer": 0.0, "escrower": 1.0},
+            "tocks": {"signify": {"initer": 0.0, "escrower": 1.0}},
         }
 
-        assert agent.tocks == {"initer": 0.0, "escrower": 1.0}
+        assert agent.tocks["initer"] == 0.0
+        assert agent.tocks["escrower"] == 1.0
+        assert agent.tocks["querier"] == 0.0
+        assert agent.tocks is agency.signifyTocks
+        assert agent.hby.tocks is agency.keriTocks
 
         escrower_doer = next(
             (doer for doer in agent.doers if isinstance(doer, agenting.Escrower)), None
@@ -237,8 +242,7 @@ def test_load_tocks_config(helpers):
         assert querier_doer is not None
         assert querier_doer.tock == 0.0
 
-        with pytest.raises(TypeError):
-            agent.tocks["initer"] = 1.0  # agent.tocks is read-only
+        assert isinstance(agent.tocks, dict)
 
 
 def test_agency():
@@ -270,6 +274,9 @@ def test_agency():
         caid = "ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose"
         agent = agency.create(caid, salt=salter.qb64)
         assert agent.pre == "ELu7SsaPCHNcyz-eqqPfOU6rOmhH7ayGkZJxvCy0Z1yC"
+        assert agent.tocks is agency.signifyTocks
+        assert agent.hby.tocks is agency.keriTocks
+        assert "tocks" not in agent.cfd
 
         badcaid = "E987eerAdhmvrjDeam2eAO2SR5niCgnjAJXJHtJoe"
         agent = agency.get(badcaid)
@@ -287,7 +294,7 @@ def test_agency():
         assert agent.pre == "ELu7SsaPCHNcyz-eqqPfOU6rOmhH7ayGkZJxvCy0Z1yC"
 
         # Create non-temp Agency and test reload of agent from disk
-        base = "keria-temp"
+        base = f"keria-temp-{uuid.uuid4().hex}"
 
         # Clean up afterwards
         if os.path.exists(f"/usr/local/var/keri/db/{base}"):
@@ -317,6 +324,15 @@ def test_agency():
         caid = "ELI7pg979AdhmvrjDeam2eAO2SR5niCgnjAJXJHtJose"
         agent = agency.create(caid, salt=salter.qb64)
         assert agent.pre == "EBtONOpwylm2krDPNyvfN8F1dlbAxpGcKBcY7WRzs3aq"
+        assert agent.tocks is agency.signifyTocks
+        assert agent.hby.tocks is agency.keriTocks
+        assert "tocks" not in agent.cfd
+
+        # Simulate a configuration written by an older release. Reopened Agents
+        # must use the current Agency snapshot instead of the persisted copy.
+        persisted = agent.hby.cf.get()
+        persisted["tocks"] = {"signify": {"escrower": 9.0}}
+        agent.hby.cf.put(persisted)
 
         # Rcreate the agency to see if agent is reloaded from disk
         agency = agenting.Agency(
@@ -330,6 +346,9 @@ def test_agency():
 
         agent = agency.get(caid)
         assert agent.pre == "EBtONOpwylm2krDPNyvfN8F1dlbAxpGcKBcY7WRzs3aq"
+        assert agent.tocks is agency.signifyTocks
+        assert agent.tocks["escrower"] == 0.0
+        assert agent.hby.tocks is agency.keriTocks
 
         # Clean up afterwards
         if os.path.exists(f"/usr/local/var/keri/db/{base}"):
