@@ -26,7 +26,7 @@ from keria.app import delegating
 Typeage = namedtuple(
     "Tierage",
     "oobi witness delegation group query registry credential endrole "  # type: ignore[name-match]
-    "locscheme challenge exchange submit done",
+    "locscheme challenge exchange submit done multisig_add",
 )
 
 OpTypes = Typeage(
@@ -43,6 +43,7 @@ OpTypes = Typeage(
     exchange="exchange",
     submit="submit",
     done="done",
+    multisig_add="multisig.add",
 )
 
 
@@ -165,6 +166,7 @@ class Monitor:
         exchanger=None,
         credentialer=None,
         submitter=None,
+        syncer=None,
         opr=None,
         temp=False,
     ):
@@ -183,6 +185,7 @@ class Monitor:
         self.exchanger = exchanger
         self.credentialer = credentialer
         self.submitter = submitter
+        self.syncer = syncer
         self.opr = opr if opr is not None else Operator(name=hby.name, temp=temp)
 
     def submit(self, oid, typ, metadata=None):
@@ -585,6 +588,27 @@ class Monitor:
         elif op.type in (OpTypes.done,):
             done = True
             response = op.metadata["response"]
+
+        elif op.type in (OpTypes.multisig_add,):
+            required = ("gid", "target", "rotation", "manifest", "role")
+            missing = [field for field in required if field not in op.metadata]
+            if missing:
+                raise kering.ValidationError(
+                    f"invalid long running {op.type} operation, metadata missing "
+                    f"required fields {missing}"
+                )
+
+            state = self.syncer.status(op.oid) if self.syncer is not None else None
+            metadata = dict(op.metadata)
+            if state is None:
+                metadata["status"] = "waiting-approval"
+            elif state["status"] == "failed":
+                error = OperationStatus(code=400, message=state["error"])
+            else:
+                metadata["status"] = state["status"]
+                if "result" in state:
+                    metadata["result"] = state["result"]
+            done = False
 
         else:
             done = True
