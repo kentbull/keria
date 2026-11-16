@@ -92,11 +92,16 @@ class SignedHeaderAuthenticator(Authenticator):
         """
         super().__init__(agency)
 
-    def inbound(self, request: ModifiableRequest):
+    def inbound(self, request: ModifiableRequest, expect=None, verfers=None):
         """Validate that the request is correctly signed based on our version of RFC-9421
 
         Parameters:
             request (ModifiableRequest): Falcon request object
+            expect (str | None): qb64 prefix of the controller that must have signed the
+                request. When given, a request signed by any other controller is refused.
+            verfers (list[Verfer] | None): keys to verify the signature against instead of
+                the signer's accepted key state, for a request signed with the keys of a
+                rotation that has not yet been accepted.
 
         """
         headers = request.headers
@@ -105,6 +110,9 @@ class SignedHeaderAuthenticator(Authenticator):
         signature = self.getRequiredHeader(request, "SIGNATURE")
 
         resource = self.resource(request)
+        if expect is not None and resource != expect:
+            raise kering.AuthNError("Request not signed by the expected controller")
+
         agent = self.agency.get(resource)
 
         if agent is None:
@@ -122,6 +130,11 @@ class SignedHeaderAuthenticator(Authenticator):
             raise kering.AuthNError("Missing signify inputs in signature")
 
         for inputage in inputs:
+            # The expected controller is named by Signify-Resource, so the
+            # signature has to cover it.
+            if expect is not None and "signify-resource" not in inputage.fields:
+                raise kering.AuthNError("Signature does not cover Signify-Resource")
+
             items = []
             for field in inputage.fields:
                 if field.startswith("@"):
@@ -156,10 +169,16 @@ class SignedHeaderAuthenticator(Authenticator):
             items.append(f'"@signature-params: {params}"')
             ser = "\n".join(items).encode("utf-8")
 
-            ckever = agent.agentHab.kevers[resource]
+            keys = (
+                verfers
+                if verfers is not None
+                else agent.agentHab.kevers[resource].verfers
+            )
+            if not keys:
+                raise kering.AuthNError("No keys to verify the signature against")
             signages = ending.designature(signature)
             cig = signages[0].markers[inputage.name]
-            if not ckever.verfers[0].verify(sig=cig.raw, ser=ser):
+            if not keys[0].verify(sig=cig.raw, ser=ser):
                 raise kering.AuthNError(f"Signature for {inputage} invalid")
 
         request.path = unquote(request.path)

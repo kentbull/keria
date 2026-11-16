@@ -345,28 +345,52 @@ class AgentResourceEnd:
         sigs = body["sigs"]
 
         ctrlHab = agent.hby.habByName(caid, ns="agent")
-        ctrlHab.rotate(serder=rot, sigers=[core.Siger(qb64=sig) for sig in sigs])
+        kevers = agent.hby.kevers
 
+        # Only the next rotation of this controller may be applied here.
+        if (
+            rot.pre != caid
+            or rot.ilk != kering.Ilks.rot
+            or rot.sn != kevers[caid].sn + 1
+        ):
+            raise falcon.HTTPBadRequest(
+                description=f"'rot' is not the next rotation event for {caid}"
+            )
+
+        # The request must be signed as this controller with the keys the
+        # rotation establishes. Those keys are only trusted once rotate()
+        # accepts the event, which is checked below before anything is
+        # written.
         try:
-            self.authn.inbound(req)
+            self.authn.inbound(req, expect=caid, verfers=rot.verfers)
         except (kering.AuthNError, ValueError) as ex:
             raise falcon.HTTPForbidden(
                 description="invalid signature on request"
             ) from ex
 
+        # Refuse key updates that can't be applied in full before rotating,
+        # since a rotated controller can't resubmit the same rotation.
+        keys = body["keys"]
+        self.checkKeys(agent, keys)
+
+        try:
+            ctrlHab.rotate(serder=rot, sigers=[core.Siger(qb64=sig) for sig in sigs])
+        except kering.KeriError as ex:
+            raise falcon.HTTPBadRequest(
+                description=f"rotation event for {caid} was not accepted"
+            ) from ex
+
+        if kevers[caid].serder.said != rot.said:
+            raise falcon.HTTPBadRequest(
+                description=f"rotation event for {caid} was not accepted"
+            )
+
         sxlt = body["sxlt"]
         agent.mgr.sxlt = sxlt
 
-        keys = body["keys"]
         for pre, val in keys.items():
             if "sxlt" in val:
-                if (sp := agent.mgr.rb.sprms.get(pre)) is None:
-                    raise ValueError(
-                        "Attempt to update sxlt for nonexistent or invalid pre={}.".format(
-                            pre
-                        )
-                    )
-
+                sp = agent.mgr.rb.sprms.get(pre)
                 sp.sxlt = val["sxlt"]
 
                 if not agent.mgr.rb.sprms.pin(pre, val=sp):
@@ -377,27 +401,47 @@ class AgentResourceEnd:
             elif "prxs" in val:
                 hab = agent.hby.habs[pre]
                 verfers = hab.kever.verfers
-                digers = hab.kever.digers
+                digers = hab.kever.ndigers
                 prxs = val["prxs"]
 
                 for idx, prx in enumerate(prxs):
                     cipher = core.Cipher(qb64=prx)
-                    agent.mgr.rb.prxs.put(keys=verfers[idx].qb64b, val=cipher)
+                    agent.mgr.rb.prxs.pin(keys=verfers[idx].qb64b, val=cipher)
 
                 if "nxts" in val:
                     nxts = val["nxts"]
-                    if len(nxts) != len(digers):
-                        raise ValueError(
-                            "If encrypted private next keys are provided, must match digers"
-                        )
-
                     for idx, prx in enumerate(nxts):
                         cipher = core.Cipher(qb64=prx)
-                        agent.mgr.rb.nxts.put(keys=digers[idx].qb64b, val=cipher)
+                        agent.mgr.rb.nxts.pin(keys=digers[idx].qb64b, val=cipher)
 
         agent.mgr.delete_sxlt()
 
         rep.status = falcon.HTTP_204
+
+    @staticmethod
+    def checkKeys(agent, keys):
+        """Raise HTTPBadRequest unless every update in keys names a managed AID
+        and supplies one ciphertext per key."""
+        for pre, val in keys.items():
+            if "sxlt" in val:
+                if agent.mgr.rb.sprms.get(pre) is None:
+                    raise falcon.HTTPBadRequest(
+                        description=f"no salty parameters for {pre}"
+                    )
+
+            elif "prxs" in val:
+                if (hab := agent.hby.habs.get(pre)) is None:
+                    raise falcon.HTTPBadRequest(description=f"no AID {pre}")
+
+                if len(val["prxs"]) != len(hab.kever.verfers):
+                    raise falcon.HTTPBadRequest(
+                        description=f"'prxs' for {pre} must match its current keys"
+                    )
+
+                if "nxts" in val and len(val["nxts"]) != len(hab.kever.ndigers):
+                    raise falcon.HTTPBadRequest(
+                        description=f"'nxts' for {pre} must match its next key digests"
+                    )
 
     @staticmethod
     def interact(req, rep, agent, caid):
@@ -418,10 +462,28 @@ class AgentResourceEnd:
         ixn = serdering.SerderKERI(sad=ked)
         sigers = [core.Siger(qb64=sig) for sig in sigs]
 
+        # Only an interaction event of this controller is processed here.
+        if ixn.pre != caid or ixn.ilk != kering.Ilks.ixn:
+            raise falcon.HTTPBadRequest(
+                description=f"'ixn' is not an interaction event of {caid}"
+            )
+
         ctrlHab = agent.hby.habByName(caid, ns="agent")
 
-        ctrlHab.interact(serder=ixn, sigers=sigers)
-        agent.agentHab.kvy.processEvent(serder=ixn, sigers=sigers)
+        try:
+            ctrlHab.interact(serder=ixn, sigers=sigers)
+            agent.agentHab.kvy.processEvent(serder=ixn, sigers=sigers)
+        except kering.KeriError as ex:
+            raise falcon.HTTPBadRequest(
+                description=f"interaction event for {caid} was not accepted"
+            ) from ex
+
+        # The caller anchors seals from this event, so it has to be the
+        # controller's accepted latest event.
+        if agent.hby.kevers[caid].serder.said != ixn.said:
+            raise falcon.HTTPBadRequest(
+                description=f"interaction event for {caid} was not accepted"
+            )
 
         rep.status = falcon.HTTP_204
 
